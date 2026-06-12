@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>kube-scheduler 默认插件执行全景</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<style>
+  :root {
+    --theme: #326CE5;
+    --ink: #1A2B3C;
+    --gray: #5C6B7A;
+    --chip-bg: #2F4156;
+    --red: #D32F2F;
+    --red-bg: #FFEBEE;
+    --green: #2E7D32;
+    --s1-bg: #ECEFF1;
+    --s2-bg: #E3F2FD;
+    --s3-bg: #E8F5E9;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Microsoft YaHei', 'PingFang SC', 'Segoe UI', sans-serif;
+         background: #F0F2F5; color: var(--ink); }
+  .mono { font-family: Consolas, 'Courier New', monospace; }
+
+  /* ===== 页面双栏布局（此结构不要改动） ===== */
+  html, body { height: 100%; }
+  .page { display: flex; gap: 24px; padding: 20px; height: 100vh; max-width: 1560px;
+          margin: 0 auto; overflow: hidden; }
+  .left { flex: 0 0 auto; height: 100%; overflow-y: auto; overflow-x: hidden; padding-right: 14px; }
+  .right { flex: 1 1 0; min-width: 420px; height: 100%; display: flex;
+           flex-direction: column; gap: 14px; }
+
+  /* ===== 卡片画布：工程蓝图 ===== */
+  #card { width: 880px; background: #fff; border: 1.5px solid #D5DCE3;
+          border-radius: 14px; padding: 22px 20px; position: relative;
+          background-image: linear-gradient(#F2F5F8 1px, transparent 1px),
+                            linear-gradient(90deg, #F2F5F8 1px, transparent 1px);
+          background-size: 22px 22px; }
+
+  .card-head { display: flex; align-items: center; gap: 14px; padding: 4px 8px 16px; }
+  .card-logo { width: 46px; height: 46px; border-radius: 10px; background: transparent;
+               display: flex; align-items: center; justify-content: center; }
+  .card-logo img { width: 46px; height: 46px; }
+  .card-title { font-size: 23px; font-weight: bold; color: var(--theme); letter-spacing: 1px; }
+  .card-sub { font-size: 12.5px; color: var(--gray); margin-top: 4px; font-family: Consolas, monospace; }
+
+  .sec { border-radius: 12px; padding: 15px 18px; position: relative; }
+  .sec-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 11px; }
+  .sec-num { width: 25px; height: 25px; border-radius: 50%; color: #fff; font-weight: bold;
+             font-size: 13.5px; display: flex; align-items: center; justify-content: center;
+             align-self: center; font-family: Consolas, monospace; }
+  .sec-title { font-size: 18px; font-weight: bold; letter-spacing: 1px; }
+  .sec-title .mono { font-size: 13px; font-weight: normal; }
+  .sec-note { margin-left: auto; font-size: 11.5px; color: var(--gray); }
+
+  .kcard { background: #fff; border: 1px solid #CFD8DC; border-radius: 8px;
+           padding: 11px 14px; }
+  .kcard-title { font-size: 15px; font-weight: bold; font-family: Consolas, monospace; }
+  .kcard-cnt { font-size: 11.5px; color: var(--theme); font-family: Consolas, monospace;
+               font-weight: bold; margin-left: 6px; }
+  .kcard-anno { font-size: 12px; color: var(--gray); font-weight: normal; margin-left: 8px; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+  .chip { background: var(--chip-bg); color: #fff; font-family: Consolas, monospace;
+          font-size: 11.5px; padding: 3px 8px; border-radius: 4px; white-space: nowrap; }
+  .chip.hl { background: var(--theme); }
+  .chip.ghost { background: #fff; color: var(--gray); border: 1px dashed #B0BEC5; }
+  .chip-sep { color: #90A4AE; font-size: 12px; }
+
+  .note { font-size: 11.5px; color: var(--gray); margin-top: 7px; line-height: 1.55; }
+  .note .mono { font-size: 10.5px; }
+
+  .flow-arrow { display: flex; justify-content: center; padding: 4px 0; }
+  .flow-arrow::after { content: ''; width: 0; height: 0;
+       border-left: 6px solid transparent; border-right: 6px solid transparent;
+       border-top: 9px solid var(--theme); }
+  .flow-arrow.line { position: relative; height: 20px; }
+  .flow-arrow.line::before { content: ''; position: absolute; top: 0; bottom: 9px;
+       left: 50%; width: 2px; margin-left: -1px; background: var(--theme); }
+
+  .big-arrow { display: flex; justify-content: center; align-items: center; gap: 10px; padding: 8px 0; }
+  .big-arrow::before { content: ''; width: 0; height: 0;
+       border-left: 16px solid transparent; border-right: 16px solid transparent;
+       border-top: 20px solid var(--theme); }
+  .big-arrow .ba-label { font-size: 12px; color: var(--theme); font-family: Consolas, monospace; }
+
+  .with-side { display: flex; gap: 14px; align-items: stretch; }
+  .with-side .main-col { flex: 1 1 0; min-width: 0; }
+  .side-card { flex: 0 0 172px; background: var(--red-bg); border: 1.2px solid var(--red);
+               border-radius: 8px; padding: 11px 10px; text-align: center; align-self: center; }
+  .side-card .sc-title { color: var(--red); font-weight: bold; font-size: 14px;
+                         font-family: Consolas, monospace; }
+  .side-card .sc-sub { color: var(--red); font-size: 10.5px; margin: 2px 0 7px; }
+  .side-card .note { color: #B71C1C; margin-top: 6px; text-align: left; font-size: 10.5px; }
+  .side-card .chip { display: inline-block; }
+
+  .wtable { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid #B0BEC5;
+            background: #FAFBFC; margin-top: 8px; }
+  .wtable .cell { border: 0.5px solid #CFD8DC; padding: 6px 4px; text-align: center; }
+  .wtable .cell .nm { font-family: Consolas, monospace; font-size: 10.5px; display: block; }
+  .wtable .cell .nm.small { font-size: 9.5px; }
+  .wtable .cell .wt { color: var(--theme); font-weight: bold; font-size: 12px;
+                      font-family: Consolas, monospace; }
+
+  .return-path { position: absolute; border: 0 dashed var(--red); pointer-events: none; }
+  .return-path.v { border-left-width: 2px; width: 0; }
+  .return-path.h { border-top-width: 2px; height: 0; }
+  .return-arrow { position: absolute; width: 0; height: 0; }
+  .return-arrow.up { border-left: 6px solid transparent; border-right: 6px solid transparent;
+                     border-bottom: 9px solid var(--red); }
+  .return-arrow.left { border-top: 6px solid transparent; border-bottom: 6px solid transparent;
+                       border-right: 9px solid var(--red); }
+  .return-arrow.right { border-top: 6px solid transparent; border-bottom: 6px solid transparent;
+                        border-left: 9px solid var(--red); }
+  .return-label { position: absolute; color: var(--red); font-size: 11px;
+                  background: #fff; padding: 2px 3px; border-radius: 4px;
+                  border: 0.5px solid #FFCDD2; z-index: 1; }
+  .return-label.vert { writing-mode: vertical-rl; letter-spacing: 2px; }
+
+  .done-badge { display: flex; justify-content: center; margin-top: 12px; }
+  .done-badge span { background: var(--green); color: #fff; font-size: 15px; font-weight: bold;
+                     padding: 10px 40px; border-radius: 24px; letter-spacing: 2px; }
+
+  .card-foot { text-align: center; font-size: 11px; color: var(--gray); padding-top: 14px;
+               font-family: Consolas, monospace; }
+
+  /* ===== 右侧发布面板（此结构不要改动） ===== */
+  .panel { background: #fff; border: 1px solid #E0E0E0; border-radius: 14px; padding: 20px; }
+  .panel.grow { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+  .panel.grow #pub-body { flex: 1 1 0; min-height: 0; }
+  .panel h3 { font-size: 15px; margin-bottom: 10px; display: flex; align-items: center; }
+  .copy-btn, .dl-btn { margin-left: auto; border: none; border-radius: 7px; padding: 6px 14px;
+       font-size: 12.5px; cursor: pointer; color: #fff; background: var(--theme); }
+  .copy-btn:hover, .dl-btn:hover { opacity: .85; }
+  .dl-row { display: flex; gap: 10px; align-items: center; }
+  .dl-row select { padding: 5px 8px; border-radius: 7px; border: 1px solid #CFD8DC; font-size: 12.5px; }
+  .title-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+       background: #FAFBFC; border: 1px solid #ECEFF1; border-radius: 8px; }
+  .title-item + .title-item { margin-top: 8px; }
+  .ti-tag { flex: 0 0 auto; font-size: 11px; color: #fff; background: var(--gray);
+       padding: 2px 8px; border-radius: 4px; }
+  .ti-tag.main { background: var(--theme); }
+  .ti-text { flex: 1 1 0; font-size: 13.5px; line-height: 1.5; }
+  .title-item .copy-btn { margin-left: 0; flex: 0 0 auto; padding: 4px 10px; }
+  #pub-body { white-space: pre-wrap; font-size: 13.5px; line-height: 1.8;
+       background: #FAFBFC; border: 1px solid #ECEFF1; border-radius: 8px; padding: 14px;
+       overflow-y: auto; }
+  .toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+       background: var(--ink); color: #fff; padding: 9px 22px; border-radius: 8px;
+       font-size: 13px; opacity: 0; transition: opacity .25s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body data-theme="blueprint">
+<div class="page">
+
+  <!-- ===================== 左：记忆卡片 ===================== -->
+  <div class="left">
+    <div id="card">
+      <div class="card-head">
+        <div class="card-logo"><img src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9Im5vIj8+CjwhLS0gQ3JlYXRlZCB3aXRoIElua3NjYXBlIChodHRwOi8vd3d3Lmlua3NjYXBlLm9yZy8pIC0tPgoKPHN2ZwogICB3aWR0aD0iNzc3IgogICBoZWlnaHQ9Ijc1My45MTc3OSIKICAgaWQ9InN2ZzIiCiAgIHZlcnNpb249IjEuMSIKICAgaW5rc2NhcGU6dmVyc2lvbj0iMS4yLjEgKDljNmQ0MWU0MTAsIDIwMjItMDctMTQpIgogICBzb2RpcG9kaTpkb2NuYW1lPSJsb2dvLnN2ZyIKICAgaW5rc2NhcGU6ZXhwb3J0LWZpbGVuYW1lPSJsb2dvLnBuZyIKICAgaW5rc2NhcGU6ZXhwb3J0LXhkcGk9IjQ0NC43ODc2NiIKICAgaW5rc2NhcGU6ZXhwb3J0LXlkcGk9IjQ0NC43ODc2NiIKICAgeG1sbnM6aW5rc2NhcGU9Imh0dHA6Ly93d3cuaW5rc2NhcGUub3JnL25hbWVzcGFjZXMvaW5rc2NhcGUiCiAgIHhtbG5zOnNvZGlwb2RpPSJodHRwOi8vc29kaXBvZGkuc291cmNlZm9yZ2UubmV0L0RURC9zb2RpcG9kaS0wLmR0ZCIKICAgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIgogICB4bWxuczpzdmc9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIgogICB4bWxuczpyZGY9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvMDIvMjItcmRmLXN5bnRheC1ucyMiCiAgIHhtbG5zOmNjPSJodHRwOi8vY3JlYXRpdmVjb21tb25zLm9yZy9ucyMiCiAgIHhtbG5zOmRjPSJodHRwOi8vcHVybC5vcmcvZGMvZWxlbWVudHMvMS4xLyI+CiAgPHRpdGxlCiAgICAgaWQ9InRpdGxlMTIyMSI+S3ViZXJuZXRlcyBsb2dvIHdpdGggbm8gYm9yZGVyPC90aXRsZT4KICA8ZGVmcwogICAgIGlkPSJkZWZzNCIgLz4KICA8c29kaXBvZGk6bmFtZWR2aWV3CiAgICAgaWQ9ImJhc2UiCiAgICAgcGFnZWNvbG9yPSIjZmZmZmZmIgogICAgIGJvcmRlcmNvbG9yPSIjNjY2NjY2IgogICAgIGJvcmRlcm9wYWNpdHk9IjEuMCIKICAgICBpbmtzY2FwZTpwYWdlb3BhY2l0eT0iMC4wIgogICAgIGlua3NjYXBlOnBhZ2VzaGFkb3c9IjIiCiAgICAgaW5rc2NhcGU6em9vbT0iMC43NTEzMDA5NiIKICAgICBpbmtzY2FwZTpjeD0iLTE0OC40MDkyMyIKICAgICBpbmtzY2FwZTpjeT0iMzEwLjc5NDIzIgogICAgIGlua3NjYXBlOmRvY3VtZW50LXVuaXRzPSJweCIKICAgICBpbmtzY2FwZTpjdXJyZW50LWxheWVyPSJsYXllcjEiCiAgICAgc2hvd2dyaWQ9ImZhbHNlIgogICAgIGlua3NjYXBlOndpbmRvdy13aWR0aD0iMTc5NSIKICAgICBpbmtzY2FwZTp3aW5kb3ctaGVpZ2h0PSIxMTE0IgogICAgIGlua3NjYXBlOndpbmRvdy14PSI3MyIKICAgICBpbmtzY2FwZTp3aW5kb3cteT0iMzYiCiAgICAgaW5rc2NhcGU6d2luZG93LW1heGltaXplZD0iMCIKICAgICBpbmtzY2FwZTpzbmFwLWdsb2JhbD0iZmFsc2UiCiAgICAgZml0LW1hcmdpbi10b3A9IjEwIgogICAgIGZpdC1tYXJnaW4tbGVmdD0iMTAiCiAgICAgZml0LW1hcmdpbi1yaWdodD0iMTAiCiAgICAgZml0LW1hcmdpbi1ib3R0b209IjEwIgogICAgIGlua3NjYXBlOnNob3dwYWdlc2hhZG93PSIyIgogICAgIGlua3NjYXBlOnBhZ2VjaGVja2VyYm9hcmQ9IjAiCiAgICAgaW5rc2NhcGU6ZGVza2NvbG9yPSIjZDFkMWQxIiAvPgogIDxtZXRhZGF0YQogICAgIGlkPSJtZXRhZGF0YTciPgogICAgPHJkZjpSREY+CiAgICAgIDxjYzpXb3JrCiAgICAgICAgIHJkZjphYm91dD0iIj4KICAgICAgICA8ZGM6Zm9ybWF0PmltYWdlL3N2Zyt4bWw8L2RjOmZvcm1hdD4KICAgICAgICA8ZGM6dHlwZQogICAgICAgICAgIHJkZjpyZXNvdXJjZT0iaHR0cDovL3B1cmwub3JnL2RjL2RjbWl0eXBlL1N0aWxsSW1hZ2UiIC8+CiAgICAgICAgPGRjOnRpdGxlPkt1YmVybmV0ZXMgbG9nbyB3aXRoIG5vIGJvcmRlcjwvZGM6dGl0bGU+CiAgICAgICAgPGRjOmRlc2NyaXB0aW9uPiZxdW90O2t1YmVjdGwmcXVvdDsgaXMgcHJvbm91bmNlZCAmcXVvdDtreW9vYiBrdXR0ZWwmcXVvdDs8L2RjOmRlc2NyaXB0aW9uPgogICAgICA8L2NjOldvcms+CiAgICA8L3JkZjpSREY+CiAgPC9tZXRhZGF0YT4KICA8ZwogICAgIGlua3NjYXBlOmxhYmVsPSJMYXllciAxIgogICAgIGlua3NjYXBlOmdyb3VwbW9kZT0ibGF5ZXIiCiAgICAgaWQ9ImxheWVyMSIKICAgICB0cmFuc2Zvcm09InRyYW5zbGF0ZSgtMjEuNDc1OTYyLC0xNzguNTM1KSI+CiAgICA8ZwogICAgICAgaWQ9ImcxMzUwIgogICAgICAgdHJhbnNmb3JtPSJtYXRyaXgoMS4wNTU2ODU1LDAsMCwxLjA1NTY4NTUsLTEuMTk1ODk5MiwtOS45NDE4MDcyKSI+CiAgICAgIDxwYXRoCiAgICAgICAgIHN0eWxlPSJmaWxsOiMzMjZjZTU7ZmlsbC1vcGFjaXR5OjE7c3Ryb2tlOm5vbmU7c3Ryb2tlLXdpZHRoOjA7c3Ryb2tlLW1pdGVybGltaXQ6NDtzdHJva2UtZGFzaGFycmF5Om5vbmU7c3Ryb2tlLW9wYWNpdHk6MSIKICAgICAgICAgZD0ibSAzODYuOTMxODgsMTc4LjU5Nzk0IGEgNDguOTI5NjY4LDQ4LjUyOTI0OCAwIDAgMCAtMTguNzUxMjksNC43NDUwOSBMIDExMi4zMDU2NywzMDUuNjAyNzQgQSA0OC45Mjk2NjgsNDguNTI5MjQ4IDAgMCAwIDg1LjgzMTMzMywzMzguNTIzODUgTCAyMi43MDUyNjYsNjEzLjE1MDA2IGEgNDguOTI5NjY4LDQ4LjUyOTI0OCAwIDAgMCA2LjY0MzEyNywzNy4yMDgwNSA0OC45Mjk2NjgsNDguNTI5MjQ4IDAgMCAwIDIuNzgxNjA1LDMuODYxNTMgTCAyMDkuMjM2NDIsODc0LjQyNDU2IGEgNDguOTI5NjY4LDQ4LjUyOTI0OCAwIDAgMCAzOC4yNTUyNSwxOC4yNjA0MiBsIDI4NC4wMTgyMSwtMC4wNjU0IGEgNDguOTI5NjY4LDQ4LjUyOTI0OCAwIDAgMCAzOC4yNTUyNSwtMTguMjI3NjkgTCA3NDYuODA2MSw2NTQuMTU0MTkgYSA0OC45Mjk2NjgsNDguNTI5MjQ4IDAgMCAwIDkuNDU3NDUsLTQxLjA2OTU4IEwgNjkzLjAzOTMxLDMzOC40NTg0IEEgNDguOTI5NjY4LDQ4LjUyOTI0OCAwIDAgMCA2NjYuNTY0OTgsMzA1LjUzNzI5IEwgNDEwLjY1NzM0LDE4My4zNDMwMyBhIDQ4LjkyOTY2OCw0OC41MjkyNDggMCAwIDAgLTIzLjcyNTQ2LC00Ljc0NTA5IHoiCiAgICAgICAgIGlkPSJwYXRoMzA1NSIKICAgICAgICAgaW5rc2NhcGU6Y29ubmVjdG9yLWN1cnZhdHVyZT0iMCIKICAgICAgICAgaW5rc2NhcGU6ZXhwb3J0LWZpbGVuYW1lPSJuZXcucG5nIgogICAgICAgICBpbmtzY2FwZTpleHBvcnQteGRwaT0iMjUwLjU1IgogICAgICAgICBpbmtzY2FwZTpleHBvcnQteWRwaT0iMjUwLjU1IiAvPgogICAgICA8cGF0aAogICAgICAgICBpbmtzY2FwZTpjb25uZWN0b3ItY3VydmF0dXJlPSIwIgogICAgICAgICBpZD0icGF0aDMwNTkiCiAgICAgICAgIGQ9Im0gMzg5LjQ2NzI5LDI3Mi4wNTY4NSBjIC04LjQ1ODEzLDguNmUtNCAtMTUuMzE2MTksNy42MTkyOCAtMTUuMzE1MTksMTcuMDE2ODcgMTBlLTYsMC4xNDQyMyAwLjAyOTUsMC4yODIwNSAwLjAzMjcsMC40MjU0MiAtMC4wMTI1LDEuMjc2OTEgLTAuMDc0MSwyLjgxNTIzIC0wLjAzMjcsMy45MjY5NyAwLjIwMTcxLDUuNDIwMjcgMS4zODMyNCw5LjU2ODcxIDIuMDk0MzksMTQuNTYyNTIgMS4yODgzNCwxMC42ODgzNCAyLjM2Nzg4LDE5LjU0ODMyIDEuNzAxNjksMjcuNzgzMzMgLTAuNjQ3ODksMy4xMDUzNCAtMi45MzUxNiw1Ljk0NTM0IC00Ljk3NDE3LDcuOTE5MzkgbCAtMC4zNTk5Nyw2LjQ3OTUgYyAtOS4xOTEwMiwwLjc2MTQ5IC0xOC40NDM1MiwyLjE1NTkgLTI3LjY4NTE1LDQuMjU0MjIgLTM5Ljc2NjcyLDkuMDI5MDggLTc0LjAwNTE3LDI5LjUxMzEgLTEwMC4wNzIzMiw1Ny4xNzAxNiAtMS42OTE0NSwtMS4xNTM5MyAtNC42NTA2MiwtMy4yNzY4MSAtNS41MzA1NCwtMy45MjY5NyAtMi43MzQ0LDAuMzY5MjYgLTUuNDk3OTgsMS4yMTI5NSAtOS4wOTc0OCwtMC44ODM1NyAtNi44NTM3OCwtNC42MTM1NCAtMTMuMDk2MDYsLTEwLjk4MTgzIC0yMC42NDkzMywtMTguNjUzMTEgLTMuNDYwOTUsLTMuNjY5NTYgLTUuOTY3MjQsLTcuMTYzODYgLTEwLjA3OTIzLC0xMC43MDEgLTAuOTMzOCwtMC44MDMyNyAtMi4zNTg4OCwtMS44ODk3MSAtMy40MDMzNywtMi43MTYxNiAtMy4yMTQ3NiwtMi41NjMwNyAtNy4wMDY0NSwtMy44OTk3NiAtMTAuNjY4MjcsLTQuMDI1MTQgLTQuNzA4MDcsLTAuMTYxMjEgLTkuMjQwMzcsMS42Nzk1NCAtMTIuMjA2MzQsNS4zOTk1OCAtNS4yNzI4Myw2LjYxMzQyIC0zLjU4NDY2LDE2LjcyMTYzIDMuNzYzMzUsMjIuNTgwMDkgMC4wNzQ2LDAuMDU5NCAwLjE1Mzk2LDAuMTA1NTQgMC4yMjkwNywwLjE2MzYyIDEuMDA5NzMsMC44MTg1MSAyLjI0NjE5LDEuODY3MjggMy4xNzQzLDIuNTUyNTQgNC4zNjM1MiwzLjIyMTc0IDguMzQ5NDgsNC44NzA5NiAxMi42OTcyMSw3LjQyODUyIDkuMTU5NzksNS42NTY3MyAxNi43NTMzNywxMC4zNDcxNiAyMi43NzY0NCwxNi4wMDI0MSAyLjM1MjAxLDIuNTA3MTUgMi43NjMxLDYuOTI1IDMuMDc2MTIsOC44MzU2OCBsIDQuOTA4NzIsNC4zODUxMiBjIC0yNi4yNzc2NCwzOS41NDU4NCAtMzguNDM5MTUsODguMzkyOTQgLTMxLjI1MjEsMTM4LjE2Mzk1IGwgLTYuNDE0MDUsMS44NjUzMSBjIC0xLjY5MDQ4LDIuMTgyOTkgLTQuMDc5MjUsNS42MTc5MSAtNi41Nzc3Myw2LjY0MzEzIC03Ljg4MDI2LDIuNDgyMDYgLTE2Ljc0OTA1LDMuMzkzNTIgLTI3LjQ1NjA4LDQuNTE2MDEgLTUuMDI2ODQsMC40MTc5OSAtOS4zNjQxOCwwLjE2ODU1IC0xNC42OTM0MiwxLjE3ODA5IC0xLjE3MjkzLDAuMjIyMiAtMi44MDcyMiwwLjY0Nzk4IC00LjA5MDU5LDAuOTQ5MDIgLTAuMDQ0NiwwLjAwOSAtMC4wODYzLDAuMDIyNiAtMC4xMzA5LDAuMDMyNyAtMC4wNywwLjAxNjIgLTAuMTYxODUsMC4wNTAyIC0wLjIyOTA3LDAuMDY1NCAtOS4wMjY5NSwyLjE4MTA5IC0xNC44MjU4OCwxMC40NzgyMSAtMTIuOTU5MDEsMTguNjUzMTIgMS44NjczMSw4LjE3NjgyIDEwLjY4NDY1LDEzLjE0OTM1IDE5Ljc2NTc2LDExLjE5MTg3IDAuMDY1NiwtMC4wMTUgMC4xNjA3NCwtMC4wMTc1IDAuMjI5MDcsLTAuMDMyNyAwLjEwMjUyLC0wLjAyMzUgMC4xOTI3OCwtMC4wNzMyIDAuMjk0NTIsLTAuMDk4MSAxLjI2NTksLTAuMjc3ODggMi44NTIzMiwtMC41ODcwNSAzLjk1OTcsLTAuODgzNTcgNS4yMzk0NiwtMS40MDI4NSA5LjAzNDA3LC0zLjQ2NDA3IDEzLjc0NDQsLTUuMjY4NjggMTAuMTMzNjIsLTMuNjM0NTcgMTguNTI2NjUsLTYuNjcwODUgMjYuNzAzNDEsLTcuODUzOTUgMy40MTUwOCwtMC4yNjc0NyA3LjAxMzE2LDIuMTA3MTIgOC44MDI5NiwzLjEwODg2IGwgNi42NzU4NSwtMS4xNDUzNyBjIDE1LjM2MjUsNDcuNjI5MjYgNDcuNTU3MzYsODYuMTI2MzYgODguMzI0MTMsMTEwLjI4MjQ1IGwgLTIuNzgxNiw2LjY3NTg1IGMgMS4wMDI2LDIuNTkyMjQgMi4xMDg0Myw2LjA5OTU4IDEuMzYxNTgsOC42NTk1NyAtMi45NzI2NSw3LjcwODU5IC04LjA2NDQsMTUuODQ1MDQgLTEzLjg2MjQ0LDI0LjkxNjA0IC0yLjgwNzM3LDQuMTkwNzggLTUuNjgwNTMsNy40NDMwMyAtOC4yMTM5MiwxMi4yMzkwNiAtMC42MDYyMiwxLjE0NzYxIC0xLjM3ODI5LDIuOTEwNDggLTEuOTYzNDgsNC4xMjMzMiAtMy45MzYyMyw4LjQyMTkgLTEuMDQ4OTEsMTguMTIxODcgNi41MTIyMywyMS43NjE5NyA3LjYwODYzLDMuNjYyOTUgMTcuMDUyOTcsLTAuMjAwMzcgMjEuMTQwMTksLTguNjM5MzQgMC4wMDYsLTAuMDExOSAwLjAyNjksLTAuMDIwNyAwLjAzMjcsLTAuMDMyNyAwLjAwNCwtMC4wMDkgLTAuMDA0LC0wLjAyMzYgMCwtMC4wMzI3IDAuNTgyMTcsLTEuMTk2NDcgMS40MDY5NCwtMi43NjkxNiAxLjg5ODA0LC0zLjg5NDI0IDIuMTY5OTIsLTQuOTcxMDUgMi44OTE5NCwtOS4yMzEwNyA0LjQxNzg0LC0xNC4wMzg5MyA0LjA1MjI0LC0xMC4xNzg4NSA2LjI3ODYyLC0yMC44NTkwNSAxMS44NTY5MiwtMjcuNTE0MDQgMS41Mjc1MiwtMS44MjIzNiA0LjAxNzg4LC0yLjUyMzIxIDYuNTk5ODUsLTMuMjE0NTEgbCAzLjQ2ODgyLC02LjI4MzE1IGMgMzUuNTM5ODcsMTMuNjQxNTYgNzUuMzIxMDYsMTcuMzAyMTkgMTE1LjA2MDI3LDguMjc5MzYgOS4wNjU1MSwtMi4wNTgzMyAxNy44MTczOSwtNC43MjIyNiAyNi4yNzc5OCwtNy45MTkzOSAwLjk3NDkyLDEuNzI5MjYgMi43ODY3Miw1LjA1MzQ0IDMuMjcyNDgsNS44OTA0NiAyLjYyMzg0LDAuODUzNjUgNS40ODc3NSwxLjI5NDQ3IDcuODIxMjIsNC43NDUwOSA0LjE3MzQ3LDcuMTMwMzEgNy4wMjc2LDE1LjU2NTYzIDEwLjUwNDY1LDI1Ljc1NDM5IDEuNTI2MTUsNC44MDc3NyAyLjI4MDM4LDkuMDY3OTggNC40NTA1NywxNC4wMzg5MiAwLjQ5NDYzLDEuMTMzMDEgMS4zMTUyNywyLjcyNzc5IDEuODk4MDMsMy45MjY5NyA0LjA3ODYzLDguNDY2MzggMTMuNTUyODksMTIuMzQyOTEgMjEuMTcyOTIsOC42NzIwNiA3LjU2MDIxLC0zLjY0MjAzIDEwLjQ1MDcxLC0xMy4zNDExMiA2LjUxMjIzLC0yMS43NjE5NiAtMC41ODUyNiwtMS4yMTI4IC0xLjM4OTk0LC0yLjk3NTc1IC0xLjk5NjIxLC00LjEyMzMyIC0yLjUzMzY0LC00Ljc5NTg5IC01LjQwNjM0LC04LjAxNTcyIC04LjIxMzkyLC0xMi4yMDYzNCAtNS43OTg1MiwtOS4wNzA3IC0xMC42MDc3MiwtMTYuNjA2MDYgLTEzLjU4MDc3LC0yNC4zMTQ1IC0xLjI0MzEzLC0zLjk3NTc0IDAuMjA5NzMsLTYuNDQ4MzQgMS4xNzgwOSwtOS4wMzIwMyAtMC41Nzk5MSwtMC42NjQ3MyAtMS44MjA4NywtNC40MTkyNSAtMi41NTI1MywtNi4xODQ5OCA0Mi4zNjY2OCwtMjUuMDE1NSA3My42MTYxMiwtNjQuOTQ4MjMgODguMjkxNDEsLTExMS4wNjc4NSAxLjk4MTcsMC4zMTE0NiA1LjQyNjA3LDAuOTIwODYgNi41NDQ5NSwxLjE0NTM3IDIuMzAzMzQsLTEuNTE5MTYgNC40MjExOCwtMy41MDEzMSA4LjU3Mzg5LC0zLjE3NDMgOC4xNzY4MSwxLjE4MjY2IDE2LjU2OTYsNC4yMTk5IDI2LjcwMzQsNy44NTM5NCA0LjcxMDQzLDEuODA0MzggOC41MDQ4OCwzLjg5ODgzIDEzLjc0NDQsNS4zMDE0MSAxLjEwNzQsMC4yOTY0NSAyLjY5Mzc4LDAuNTczMDMgMy45NTk3LDAuODUwODUgMC4xMDE3OSwwLjAyNDkgMC4xOTE5NSwwLjA3NDggMC4yOTQ1MiwwLjA5ODEgMC4wNjg0LDAuMDE1MyAwLjE2MzUyLDAuMDE3NyAwLjIyOTA4LDAuMDMyNyA5LjA4MTYzLDEuOTU1MDYgMTcuOTAwNTQsLTMuMDE0NTYgMTkuNzY1NzUsLTExLjE5MTg3IDEuODY0NzgsLTguMTc1MzkgLTMuOTMxNDcsLTE2LjQ3NDQ0IC0xMi45NTksLTE4LjY1MzExIC0xLjMxMzExLC0wLjI5ODU5IC0zLjE3NTM1LC0wLjgwNTY5IC00LjQ1MDU3LC0xLjA0NzIgLTUuMzI5MjksLTEuMDA5MjYgLTkuNjY2NTUsLTAuNzYwMzYgLTE0LjY5MzQyLC0xLjE3ODA5IC0xMC43MDcwOCwtMS4xMjE5NCAtMTkuNTc1NjksLTIuMDM0MzcgLTI3LjQ1NjA3LC00LjUxNjAxIC0zLjIxMzA2LC0xLjI0NjQ2IC01LjQ5ODg0LC01LjA2OTcxIC02LjYxMDQ2LC02LjY0MzEzIGwgLTYuMTg0OTgsLTEuNzk5ODYgYyAzLjIwNjc4LC0yMy4xOTk5NCAyLjM0MjEsLTQ3LjM0NDk3IC0zLjIwNzAzLC03MS41MDM2MSAtNS42MDA3OSwtMjQuMzgzNTcgLTE1LjQ5ODgzLC00Ni42ODQ3MiAtMjguNjk5NjEsLTY2LjMzMzA5IDEuNTg2NTUsLTEuNDQyMjkgNC41ODI3MSwtNC4wOTU0OCA1LjQzMjMxLC00Ljg3NTk5IDAuMjQ4MzUsLTIuNzQ4MDEgMC4wMzUsLTUuNjI5MjIgMi44Nzk3OCwtOC42NzIwNiA2LjAyMjc2LC01LjY1NTU3IDEzLjYxNjk0LC0xMC4zNDUyIDIyLjc3NjQzLC0xNi4wMDI0MSA0LjM0NzYsLTIuNTU3NzkgOC4zNjY1OSwtNC4yMDY1NSAxMi43Mjk5MywtNy40Mjg1MiAwLjk4NjcyLC0wLjcyODYgMi4zMzQwOSwtMS44ODI0MyAzLjM3MDY1LC0yLjcxNjE2IDcuMzQ2NDYsLTUuODYwNDMgOS4wMzc4OCwtMTUuOTY4MDMgMy43NjMzNSwtMjIuNTgwMDkgLTUuMjc0NTMsLTYuNjEyMDUgLTE1LjQ5NTQzLC03LjIzNDg3IC0yMi44NDE4OCwtMS4zNzQ0NCAtMS4wNDU2OSwwLjgyODE4IC0yLjQ2NDYsMS45MDg1MyAtMy40MDMzOCwyLjcxNjE2IC00LjExMTgsMy41MzczNyAtNi42NTExOSw3LjAzMTI2IC0xMC4xMTE5NSwxMC43MDEgLTcuNTUyODYsNy42NzE2OCAtMTMuNzk1NzgsMTQuMDcxOTMgLTIwLjY0OTMyLDE4LjY4NTg0IC0yLjk2OTg1LDEuNzI4OTcgLTcuMzE5ODQsMS4xMzA3MyAtOS4yOTM4OSwxLjAxNDQ2IGwgLTUuODI1MDEsNC4xNTYwNSBDIDUwMC4yNzMxMSwzNzYuODYzMTggNDU1LjA0OTIsMzU0LjU5NDc1IDQwNi4zNTMzLDM1MC4yNjg5NyBjIC0wLjEzNjIsLTIuMDQwNjkgLTAuMzE0NjMsLTUuNzI5MzcgLTAuMzU5OTcsLTYuODM5NDggLTEuOTkzNTUsLTEuOTA3NjIgLTQuNDAxNzksLTMuNTM2MjIgLTUuMDA2ODksLTcuNjU3NTkgLTAuNjY2MTksLTguMjM1MDEgMC40NDYwNywtMTcuMDk0OTkgMS43MzQ0MSwtMjcuNzgzMzMgMC43MTExNSwtNC45OTM4MSAxLjg5MjY4LC05LjE0MjI1IDIuMDk0MzksLTE0LjU2MjUyIDAuMDQ1OSwtMS4yMzIxNSAtMC4wMjc3LC0zLjAyMDExIC0wLjAzMjcsLTQuMzUyMzkgLTEwZS00LC05LjM5NzU5IC02Ljg1NzA1LC0xNy4wMTc3MiAtMTUuMzE1MTgsLTE3LjAxNjg3IHogbSAtMTkuMTc2NzEsMTE4Ljc5MDg4IC00LjU0ODc0LDgwLjMzOTI5IC0wLjMyNzI1LDAuMTYzNjMgYyAtMC4zMDUwOSw3LjE4NzI1IC02LjIyMDI4LDEyLjkyNjI4IC0xMy40ODI2LDEyLjkyNjI4IC0yLjk3NDg3LDAgLTUuNzIwNzUsLTAuOTU1MzQgLTcuOTUyMTIsLTIuNTg1MjYgbCAtMC4xMzA5LDAuMDY1NCAtNjUuODc0OTQsLTQ2LjY5ODIzIGMgMjAuMjQ2MDUsLTE5LjkwODM0IDQ2LjE0MjM0LC0zNC42MjA1OSA3NS45ODY5LC00MS4zOTY4MyA1LjQ1MTY3LC0xLjIzNzgxIDEwLjkwMDkxLC0yLjE1NjI3IDE2LjMyOTY1LC0yLjgxNDMzIHogbSAzOC4zODYxNSwwIGMgMzQuODQzNzIsNC4yODU0NSA2Ny4wNjc0NSwyMC4wNjI5NyA5MS43NjAyMyw0NC4yNDM4OCBsIC02NS40NDk1Miw0Ni40MDM3MSAtMC4yMjkwOCwtMC4wOTgxIGMgLTUuODA5MjQsNC4yNDI5IC0xMy45OTQwOCwzLjE5MDE2IC0xOC41MjIyMSwtMi40ODcwOCAtMS44NTQ5MSwtMi4zMjU3NyAtMi44MjgxNywtNS4wNjA0NCAtMi45NDUyMywtNy44MjEyMiBsIC0wLjA2NTUsLTAuMDMyNyB6IG0gLTE1NC41OTE3OCw3NC4yMTk3NiA2MC4xNDgxMSw1My43OTk1MSAtMC4wNjU0LDAuMzI3MjUgYyA1LjQyOTA0LDQuNzE5NjcgNi4yMjk2MywxMi45MDk3MyAxLjcwMTY5LDE4LjU4NzY3IC0xLjg1NDc4LDIuMzI1ODYgLTQuMzM3NTUsMy44ODU4NSAtNy4wMDMxLDQuNjE0MTkgbCAtMC4wNjU0LDAuMjYxOCAtNzcuMDk5NTQsMjIuMjUyODMgYyAtMy45MjQxMiwtMzUuODgyMjIgNC41MzI4MywtNzAuNzYyNiAyMi4zODM3NCwtOTkuODQzMjUgeiBtIDI3MC4zMzkyNiwwLjAzMjcgYyA4LjkzNjg1LDE0LjQ4NTM1IDE1LjcwNDI4LDMwLjY2NDAzIDE5LjczMzA0LDQ4LjIwMzU3IDMuOTgwNDQsMTcuMzI5MjMgNC45NzkzOSwzNC42Mjc0OCAzLjMzNzkyLDUxLjM0NTE1IGwgLTc3LjQ5MjI0LC0yMi4zMTgyOCAtMC4wNjU0LC0wLjMyNzI1IGMgLTYuOTM5MjIsLTEuODk2NTEgLTExLjIwMzgzLC04Ljk1NTE5IC05LjU4ODM1LC0xNi4wMzUxNCAwLjY2MTg2LC0yLjkwMDMyIDIuMjAxNDMsLTUuMzUzOTEgNC4yODY5NCwtNy4xNjY3MiBsIC0wLjAzMjcsLTAuMTYzNjIgNTkuODIwODcsLTUzLjUzNzcxIHogTSAzNzcuMTMwMDYsNTIzLjAyMyBoIDI0LjY0MTc0IGwgMTUuMzE1MTksMTkuMTQzOTggLTUuNDk3NzYsMjMuODg5MDggLTIyLjEyMTk0LDEwLjYzNTU1IC0yMi4xODczOSwtMTAuNjY4MjggLTUuNDk3NzYsLTIzLjg4OTA3IHogbSA3OC45OTc1Nyw2NS41MTQ5NyBjIDEuMDQ3MTcsLTAuMDUyOSAyLjA4OTc2LDAuMDQxNSAzLjEwODg2LDAuMjI5MDcgbCAwLjEzMDksLTAuMTYzNjIgNzkuNzUwMjQsMTMuNDgyNiBjIC0xMS42NzE0OCwzMi43OTA4NCAtMzQuMDA1MjgsNjEuMTk4MTEgLTYzLjg0NjAxLDgwLjIwODM5IGwgLTMwLjk1NzYyLC03NC43NzYwOCAwLjA5ODEsLTAuMTMwOSBjIC0yLjg0Mzc3LC02LjYwNzc3IDAuMDAyLC0xNC4zNTY1NCA2LjU0NDk1LC0xNy41MDc3NCAxLjY3NTE0LC0wLjgwNjc3IDMuNDI1MjUsLTEuMjUzNSA1LjE3MDUxLC0xLjM0MTcyIHogbSAtMTMzLjk0MjQ1LDAuMzI3MjUgYyA2LjA4NjAxLDAuMDg1MyAxMS41NDQ5LDQuMzA5NDYgMTIuOTU5MDEsMTAuNTA0NjUgMC42NjIwMiwyLjkwMDI4IDAuMzM5ODEsNS43NzM5NSAtMC43NTI2Nyw4LjMxMjA5IGwgMC4yMjkwNywwLjI5NDUyIC0zMC42MzAzOCw3NC4wMjM0MSBDIDI3NS4zNTI0OCw2NjMuNjIzMTMgMjUyLjU0MjQyLDYzNi4xMDc3IDI0MC4zNDA1NSw2MDIuMzQ3ODcgbCA3OS4wNjMwMywtMTMuNDE3MTUgMC4xMzA5LDAuMTYzNjIgYyAwLjg4NDM2LC0wLjE2Mjc0IDEuNzgxMjcsLTAuMjQxMjcgMi42NTA3LC0wLjIyOTA3IHogbSA2Ni43OTEyNCwzMi40MzAyOSBjIDIuMTE5OTksLTAuMDc3OSA0LjI3MTEzLDAuMzU3MDcgNi4zMTU4OCwxLjM0MTcyIDIuNjgwMywxLjI5MDY5IDQuNzUwODMsMy4zMjI5NCA2LjA1NDA4LDUuNzU5NTUgaCAwLjI5NDUyIGwgMzguOTc1Miw3MC40MjM2OSBjIC01LjA1ODI1LDEuNjk1NjUgLTEwLjI1ODM5LDMuMTQ0OCAtMTUuNTc2OTksNC4zNTI0IC0yOS44MDc4NCw2Ljc2NzkgLTU5LjUyMDk3LDQuNzE3MjUgLTg2LjQyNjEsLTQuNDUwNTcgbCAzOC44NzcwMiwtNzAuMjkyNzkgaCAwLjA2NTQgYyAyLjMzMjgsLTQuMzYwOTQgNi43NTY5OCwtNi45NjI2NSAxMS40MjA5NCwtNy4xMzQgeiIKICAgICAgICAgc3R5bGU9ImNvbG9yOiMwMDAwMDA7Zm9udC1zdHlsZTpub3JtYWw7Zm9udC12YXJpYW50Om5vcm1hbDtmb250LXdlaWdodDpub3JtYWw7Zm9udC1zdHJldGNoOm5vcm1hbDtmb250LXNpemU6bWVkaXVtO2xpbmUtaGVpZ2h0Om5vcm1hbDtmb250LWZhbWlseTpTYW5zOy1pbmtzY2FwZS1mb250LXNwZWNpZmljYXRpb246U2Fuczt0ZXh0LWluZGVudDowO3RleHQtYWxpZ246c3RhcnQ7dGV4dC1kZWNvcmF0aW9uOm5vbmU7dGV4dC1kZWNvcmF0aW9uLWxpbmU6bm9uZTtsZXR0ZXItc3BhY2luZzpub3JtYWw7d29yZC1zcGFjaW5nOm5vcm1hbDt0ZXh0LXRyYW5zZm9ybTpub25lO3dyaXRpbmctbW9kZTpsci10YjtkaXJlY3Rpb246bHRyO2Jhc2VsaW5lLXNoaWZ0OmJhc2VsaW5lO3RleHQtYW5jaG9yOnN0YXJ0O2Rpc3BsYXk6aW5saW5lO292ZXJmbG93OnZpc2libGU7dmlzaWJpbGl0eTp2aXNpYmxlO2ZpbGw6I2ZmZmZmZjtmaWxsLW9wYWNpdHk6MTtzdHJva2U6bm9uZTtzdHJva2Utd2lkdGg6MDtzdHJva2UtbWl0ZXJsaW1pdDo0O3N0cm9rZS1kYXNoYXJyYXk6bm9uZTtzdHJva2Utb3BhY2l0eToxO21hcmtlcjpub25lO2VuYWJsZS1iYWNrZ3JvdW5kOmFjY3VtdWxhdGUiCiAgICAgICAgIHNvZGlwb2RpOm5vZGV0eXBlcz0iY2NjY2NjY2NzY2NjY3Njc3NjY3NjY2NjY2NjY3NjY2NzY2NjY2NjY2NjY2NjY2NzY2Njc2NzY2NzY2NjY3Njc2NzY2NjY2NjY2NzY2Njc2NzY2NjY3NjY2Njc2NzY3NjY2NjY2NjY2NjY2NjY2NzY2Njc2NjY2NjY2NjY2NjY3NjY2NjY3NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY3NjY2NzY2NjY2NjY2Njc2NjY3NjY2NjIgogICAgICAgICBpbmtzY2FwZTpleHBvcnQtZmlsZW5hbWU9Ii4vcGF0aDMwNTkucG5nIgogICAgICAgICBpbmtzY2FwZTpleHBvcnQteGRwaT0iMjUwLjU1IgogICAgICAgICBpbmtzY2FwZTpleHBvcnQteWRwaT0iMjUwLjU1IiAvPgogICAgPC9nPgogIDwvZz4KPC9zdmc+Cg==" alt="Kubernetes"></div>
+        <div>
+          <div class="card-title">kube-scheduler 默认插件执行全景</div>
+          <div class="card-sub">一个 Pod 从入队到绑定 · 默认配置 + 默认 feature gate · 20 个插件 · 12 个扩展点</div>
+        </div>
+      </div>
+
+      <!-- ① 调度队列 -->
+      <div class="sec" id="sec-queue" style="background: var(--s1-bg)">
+        <div class="sec-head">
+          <div class="sec-num" style="background:#37474F">1</div>
+          <div class="sec-title" style="color:#37474F">调度队列</div>
+          <div class="sec-note">进 activeQ / backoffQ 前都要过 PreEnqueue（scheduling_queue.go:724 / 757）</div>
+        </div>
+        <div class="kcard" id="kc-preenq">
+          <span class="kcard-title">PreEnqueue</span><span class="kcard-cnt">×3</span>
+          <span class="kcard-anno">入队门禁，任一拒绝则被门控进 unschedulableEntities</span>
+          <div class="chips">
+            <span class="chip">SchedulingGates</span><span class="chip-sep">→</span>
+            <span class="chip hl">DynamicResources</span><span class="chip-sep">→</span>
+            <span class="chip">DefaultPreemption</span>
+          </div>
+          <div class="note">SchedulingGates 检查 spec.schedulingGates；DefaultPreemption 拦截“异步抢占进行中”的 Pod（SchedulerAsyncPreemption 默认开启，default_preemption.go:166）</div>
+        </div>
+        <div class="flow-arrow line"></div>
+        <div class="kcard">
+          <span class="kcard-title">QueueSort</span><span class="kcard-cnt">×1</span>
+          <span class="kcard-anno">activeQ 堆排序，框架要求恰好一个</span>
+          <div class="chips">
+            <span class="chip">PrioritySort</span>
+            <span class="chip ghost">优先级降序，同级按入队时间</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="big-arrow"><span class="ba-label">Pop → schedulingCycle 串行执行</span></div>
+
+      <!-- ② 调度周期 -->
+      <div class="sec" style="background: var(--s2-bg)">
+        <div class="sec-head">
+          <div class="sec-num" style="background:var(--theme)">2</div>
+          <div class="sec-title" style="color:var(--theme)">调度周期 <span class="mono">schedule_one.go:169</span></div>
+          <div class="sec-note">扩展点内顺序 = MultiPoint 注册顺序（framework.go:650）</div>
+        </div>
+
+        <div class="kcard">
+          <span class="kcard-title">PreFilter</span><span class="kcard-cnt">×11</span>
+          <span class="kcard-anno">预处理 + 快速预判，失败直接判不可调度</span>
+          <div class="chips">
+            <span class="chip">NodeAffinity</span><span class="chip-sep">→</span>
+            <span class="chip">NodePorts</span><span class="chip-sep">→</span>
+            <span class="chip">NodeResourcesFit</span><span class="chip-sep">→</span>
+            <span class="chip">VolumeRestrictions</span><span class="chip-sep">→</span>
+            <span class="chip">NodeVolumeLimits</span><span class="chip-sep">→</span>
+            <span class="chip">VolumeBinding</span><span class="chip-sep">→</span>
+            <span class="chip">VolumeZone</span><span class="chip-sep">→</span>
+            <span class="chip">PodTopologySpread</span><span class="chip-sep">→</span>
+            <span class="chip">InterPodAffinity</span><span class="chip-sep">→</span>
+            <span class="chip hl">DynamicResources</span><span class="chip-sep">→</span>
+            <span class="chip hl">NodeDeclaredFeatures</span>
+          </div>
+        </div>
+        <div class="flow-arrow line"></div>
+
+        <div class="with-side">
+          <div class="main-col">
+            <div class="kcard" id="kc-filter">
+              <span class="kcard-title">Filter</span><span class="kcard-cnt">×14</span>
+              <span class="kcard-anno">逐节点并发过滤（16 goroutine），一票否决</span>
+              <div class="chips">
+                <span class="chip">NodeUnschedulable</span><span class="chip-sep">→</span>
+                <span class="chip">NodeName</span><span class="chip-sep">→</span>
+                <span class="chip">TaintToleration</span><span class="chip-sep">→</span>
+                <span class="chip">NodeAffinity</span><span class="chip-sep">→</span>
+                <span class="chip">NodePorts</span><span class="chip-sep">→</span>
+                <span class="chip">NodeResourcesFit</span><span class="chip-sep">→</span>
+                <span class="chip">VolumeRestrictions</span><span class="chip-sep">→</span>
+                <span class="chip">NodeVolumeLimits</span><span class="chip-sep">→</span>
+                <span class="chip">VolumeBinding</span><span class="chip-sep">→</span>
+                <span class="chip">VolumeZone</span><span class="chip-sep">→</span>
+                <span class="chip">PodTopologySpread</span><span class="chip-sep">→</span>
+                <span class="chip">InterPodAffinity</span><span class="chip-sep">→</span>
+                <span class="chip hl">DynamicResources</span><span class="chip-sep">→</span>
+                <span class="chip hl">NodeDeclaredFeatures</span>
+              </div>
+            </div>
+          </div>
+          <div class="side-card" id="sc-postfilter">
+            <div class="sc-title">PostFilter ×2</div>
+            <div class="sc-sub">所有节点都被过滤掉时</div>
+            <span class="chip hl">DynamicResources</span>
+            <div style="color:var(--red);font-size:12px;line-height:1">↓</div>
+            <span class="chip red" style="background:var(--red)">DefaultPreemption</span>
+            <div class="note">先释放空闲 ResourceClaim，再考虑抢占驱逐（default_plugins.go:76）</div>
+          </div>
+        </div>
+        <div class="flow-arrow line"></div>
+
+        <div class="kcard">
+          <span class="kcard-title">PreScore</span><span class="kcard-cnt">×7</span>
+          <span class="kcard-anno">为打分准备状态，可返回 Skip 跳过打分</span>
+          <div class="chips">
+            <span class="chip">TaintToleration</span><span class="chip-sep">→</span>
+            <span class="chip">NodeAffinity</span><span class="chip-sep">→</span>
+            <span class="chip">NodeResourcesFit</span><span class="chip-sep">→</span>
+            <span class="chip">VolumeBinding</span><span class="chip-sep">→</span>
+            <span class="chip">PodTopologySpread</span><span class="chip-sep">→</span>
+            <span class="chip">InterPodAffinity</span><span class="chip-sep">→</span>
+            <span class="chip">NodeResourcesBalancedAllocation</span>
+          </div>
+        </div>
+        <div class="flow-arrow line"></div>
+
+        <div class="kcard">
+          <span class="kcard-title">Score</span><span class="kcard-cnt">×9</span>
+          <span class="kcard-anno">每节点打分 0-100，按权重加权求和</span>
+          <div class="wtable">
+            <div class="cell"><span class="nm">TaintToleration</span><span class="wt">×3</span></div>
+            <div class="cell"><span class="nm">NodeAffinity</span><span class="wt">×2</span></div>
+            <div class="cell"><span class="nm">PodTopologySpread</span><span class="wt">×2</span></div>
+            <div class="cell"><span class="nm">InterPodAffinity</span><span class="wt">×2</span></div>
+            <div class="cell"><span class="nm">DynamicResources</span><span class="wt">×2</span></div>
+            <div class="cell"><span class="nm">NodeResourcesFit</span><span class="wt">×1</span></div>
+            <div class="cell"><span class="nm small">NodeResourcesBalancedAllocation</span><span class="wt">×1</span></div>
+            <div class="cell"><span class="nm">ImageLocality</span><span class="wt">×1</span></div>
+            <div class="cell"><span class="nm">VolumeBinding</span><span class="wt">×1</span></div>
+          </div>
+          <div class="note">未配置权重时默认为 1（framework.go:607）；VolumeBinding 仅在 Pod 使用静态绑定 PV 时实际参与（volume_binding.go:454）</div>
+        </div>
+        <div class="flow-arrow line"></div>
+
+        <div class="kcard">
+          <span class="kcard-title">selectHost → assume</span>
+          <span class="kcard-anno">选出最高分节点，在调度缓存中预占资源（schedule_one.go:320）</span>
+        </div>
+        <div class="flow-arrow line"></div>
+
+        <div class="kcard">
+          <span class="kcard-title">Reserve</span><span class="kcard-cnt">×2</span>
+          <span class="kcard-anno">预留卷与设备，失败触发 Unreserve 回滚</span>
+          <div class="chips">
+            <span class="chip">VolumeBinding</span><span class="chip-sep">→</span>
+            <span class="chip hl">DynamicResources</span>
+          </div>
+        </div>
+        <div class="flow-arrow line"></div>
+
+        <div class="kcard">
+          <span class="kcard-title">Permit</span><span class="kcard-cnt">×0</span>
+          <span class="kcard-anno">默认无插件，直接放行</span>
+          <div class="chips">
+            <span class="chip ghost">留给树外插件的口子：批准 / 拒绝 / 等待（gang scheduling 场景）</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="big-arrow"><span class="ba-label">go runBindingCycle(...) 异步 goroutine（schedule_one.go:141），主循环立即调度下一个 Pod</span></div>
+
+      <!-- ③ 绑定周期 -->
+      <div class="sec" style="background: var(--s3-bg)">
+        <div class="sec-head">
+          <div class="sec-num" style="background:var(--green)">3</div>
+          <div class="sec-title" style="color:var(--green)">绑定周期 <span class="mono">schedule_one.go:391</span></div>
+          <div class="sec-note">PreBind / Bind 失败 → Unreserve → backoffQ 重试</div>
+        </div>
+
+        <div class="kcard">
+          <span class="kcard-title">WaitOnPermit</span>
+          <span class="kcard-anno">等待 Permit 放行；默认无 Permit 插件，直接通过（schedule_one.go:425）</span>
+        </div>
+        <div class="flow-arrow line" style="--theme:var(--green)"></div>
+
+        <div class="kcard" id="kc-prebind">
+          <span class="kcard-title">PreBind</span><span class="kcard-cnt">×2</span>
+          <span class="kcard-anno">真正绑定 PV / PVC，写入 ResourceClaim 分配结果</span>
+          <div class="chips">
+            <span class="chip">VolumeBinding</span><span class="chip-sep">→</span>
+            <span class="chip hl">DynamicResources</span>
+          </div>
+        </div>
+        <div class="flow-arrow line" style="--theme:var(--green)"></div>
+
+        <div class="kcard">
+          <span class="kcard-title">Bind</span><span class="kcard-cnt">×1</span>
+          <span class="kcard-anno">调用 API 写入 pods/binding 子资源</span>
+          <div class="chips"><span class="chip">DefaultBinder</span></div>
+        </div>
+        <div class="flow-arrow line" style="--theme:var(--green)"></div>
+
+        <div class="kcard">
+          <span class="kcard-title">PostBind</span><span class="kcard-cnt">×0</span>
+          <span class="kcard-anno">默认无插件；通知性质，清理插件内部状态</span>
+        </div>
+
+        <div class="done-badge"><span>Pod 已绑定到节点</span></div>
+      </div>
+
+      <div class="card-foot">基于 kubernetes master@ea58037b036（v1.37 开发版）源码核对 · 2026-06-12</div>
+    </div>
+  </div>
+
+  <!-- ===================== 右：发布内容 ===================== -->
+  <div class="right">
+    <div class="panel">
+      <h3>下载卡片 PNG（无损）
+        <span class="dl-row" style="margin-left:auto">
+          <select id="dl-scale">
+            <option value="2">2× 高清</option>
+            <option value="3" selected>3× 超清</option>
+            <option value="4">4× 打印级</option>
+          </select>
+          <button class="dl-btn" onclick="downloadPNG()">下载 PNG</button>
+        </span>
+      </h3>
+      <div style="font-size:12px;color:var(--gray)">导出为无损 PNG；首次使用需联网加载 html2canvas。</div>
+    </div>
+
+    <div class="panel">
+      <h3>标题</h3>
+      <div class="title-item">
+        <span class="ti-tag main">主</span>
+        <div class="ti-text" id="title-main">一个 Pod 的调度之旅：kube-scheduler 默认启用的 20 个插件与执行顺序</div>
+        <button class="copy-btn" onclick="copyText('title-main')">复制</button>
+      </div>
+      <div class="title-item">
+        <span class="ti-tag">备选</span>
+        <div class="ti-text" id="title-alt1">从 PreEnqueue 到 PostBind：kube-scheduler 12 个扩展点的默认插件全景</div>
+        <button class="copy-btn" onclick="copyText('title-alt1')">复制</button>
+      </div>
+      <div class="title-item">
+        <span class="ti-tag">备选</span>
+        <div class="ti-text" id="title-alt2">你背的调度插件清单可能过时了：v1.37 默认启用 20 个插件，新增 3 个</div>
+        <button class="copy-btn" onclick="copyText('title-alt2')">复制</button>
+      </div>
+    </div>
+
+    <div class="panel grow">
+      <h3>正文（纯文本，可直接粘贴公众号）<button class="copy-btn" onclick="copyText('pub-body')">复制</button></h3>
+      <div id="pub-body">kube-scheduler 的所有调度策略都以插件实现，默认配置下到底启用了哪些插件，又按什么顺序执行，答案都写在 pkg/scheduler/apis/config/v1/default_plugins.go 里。本文基于 master 分支（v1.37 开发版）逐一核对。
+
+一、默认插件从哪来
+
+默认插件全部通过 MultiPoint 一次性注册，基础清单 18 个，再按 feature gate 追加：DynamicResourceAllocation 已 GA 并锁定开启，DynamicResources 插件被插到 DefaultPreemption 之前；NodeDeclaredFeatures 从 1.36 起默认开启，追加到列表末尾。最终是 20 个插件。
+
+调度框架初始化时，expandMultiPointPlugins 函数把每个插件展开到它实现的扩展点上，扩展点内的执行顺序就是 MultiPoint 列表的注册顺序。打分插件未配置权重时默认为 1。
+
+二、入队
+
+Pod 进入 activeQ 之前要先过 PreEnqueue 这道门禁，默认有三个插件：SchedulingGates 检查 spec.schedulingGates 是否清空；DynamicResources 确认 ResourceClaim 就绪；DefaultPreemption 拦截正在执行异步抢占的 Pod。任何一个不放行，Pod 就被门控进 unschedulableEntities（即此前的 unschedulablePods）等待事件触发重试。
+
+注意，不只是新建 Pod，调度失败后重新入队同样要过 PreEnqueue。SchedulerPopFromBackoffQ 默认开启后，这次检查提前到进入 backoffQ 时执行，从 backoffQ 转入 activeQ 不再重复。
+
+进入 activeQ 后由唯一的 QueueSort 插件 PrioritySort 排序，优先级高的在前，相同优先级按入队时间先后。
+
+三、调度周期
+
+调度周期串行执行，一次只处理一个 Pod。PreFilter 阶段 11 个插件做预处理和快速预判，比如 NodePorts 提前解析出 Pod 申请的端口列表。Filter 阶段 14 个插件对每个节点并发过滤，任何一个插件否决该节点就出局。可以看到顺序上把 NodeUnschedulable、NodeName 这类开销最小的放在最前面。
+
+如果所有节点都被过滤掉，就进入 PostFilter 旁路：先由 DynamicResources 尝试释放空闲的 ResourceClaim，再由 DefaultPreemption 执行抢占。源码注释解释了这个顺序，释放空闲资源比驱逐正在工作的 Pod 代价更低。
+
+可行节点接着进入打分。PreScore 7 个插件准备状态，Score 9 个插件给每个节点打 0 到 100 分，再按权重加权求和：TaintToleration 权重 3，NodeAffinity、PodTopologySpread、InterPodAffinity、DynamicResources 权重 2，其余为 1。
+
+选出最高分节点后，assume 在调度缓存中预占资源，Reserve 阶段由 VolumeBinding 和 DynamicResources 预留卷与设备。Permit 阶段默认没有任何插件，直接放行。
+
+四、绑定周期
+
+绑定要调用 API Server，相对耗时，所以放在独立 goroutine 异步执行，调度主循环立即去处理下一个 Pod。这正是前面 assume 预占资源的意义。
+
+绑定周期依次经过 WaitOnPermit、PreBind、Bind、PostBind。PreBind 阶段 VolumeBinding 真正完成 PV 与 PVC 的绑定，DynamicResources 把分配结果写入 ResourceClaim；Bind 阶段 DefaultBinder 调用 pods/binding 子资源完成绑定；PostBind 默认无插件。PreBind 或 Bind 失败会触发 Unreserve 回滚，Pod 回到 backoffQ 等待重试。
+
+可以看到，默认配置下 Permit 和 PostBind 是空的，它们是留给扩展的口子。gang scheduling 这类“凑齐一批再放行”的需求就落在 Permit 上，1.35 起树内也有了 alpha 的 GangScheduling 插件，默认关闭。
+
+与广为流传的 v1.2x 时代清单相比，这份默认配置多了三处变化：DynamicResources 默认启用且横跨 PreEnqueue、PreFilter、Filter、PostFilter、Score、Reserve、PreBind 七个扩展点；DefaultPreemption 因为异步抢占新增了 PreEnqueue；NodeDeclaredFeatures 成为新的默认过滤插件。背过旧清单的，可以对照卡片更新一版了。</div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 1800);
+}
+function copyText(id) {
+  navigator.clipboard.writeText(document.getElementById(id).innerText)
+    .then(() => toast('已复制'))
+    .catch(() => toast('复制失败，请手动选择'));
+}
+function downloadPNG() {
+  const scale = parseInt(document.getElementById('dl-scale').value, 10);
+  const card = document.getElementById('card');
+  toast('正在渲染 ' + scale + '× PNG…');
+  html2canvas(card, { scale, backgroundColor: '#FFFFFF', useCORS: true, logging: false })
+    .then(canvas => canvas.toBlob(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = (document.title || 'memory-card') + '@' + scale + 'x.png';
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast('已下载');
+    }, 'image/png'))
+    .catch(() => toast('渲染失败：请检查网络（html2canvas 未加载）'));
+}
+
+/* 失败回路：load 后按真实坐标注入 SVG overlay，箭头尖端精确落在目标元素边界上 */
+function layoutPaths() {
+  const card = document.getElementById('card');
+  const cardR = card.getBoundingClientRect();
+  const rel = el => {
+    const r = el.getBoundingClientRect();
+    return { left: r.left - cardR.left, right: r.right - cardR.left,
+             top: r.top - cardR.top, bottom: r.bottom - cardR.top,
+             cx: r.left - cardR.left + r.width / 2,
+             cy: r.top - cardR.top + r.height / 2 };
+  };
+  const sec1   = rel(document.getElementById('sec-queue'));
+  const preenq = rel(document.getElementById('kc-preenq'));
+  const filter = rel(document.getElementById('kc-filter'));
+  const postf  = rel(document.getElementById('sc-postfilter'));
+  const prebind = rel(document.getElementById('kc-prebind'));
+
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('width', card.clientWidth);
+  svg.setAttribute('height', card.scrollHeight);
+  Object.assign(svg.style, { position: 'absolute', left: '0', top: '0', pointerEvents: 'none' });
+  const RED = '#D32F2F';
+  const line = d => {
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', d);
+    p.setAttribute('fill', 'none');
+    p.setAttribute('stroke', RED);
+    p.setAttribute('stroke-width', '2');
+    p.setAttribute('stroke-dasharray', '5 4');
+    svg.appendChild(p);
+  };
+  /* 箭头尖端 (tx,ty)，dir: 1 朝右 / -1 朝左 */
+  const arrow = (tx, ty, dir) => {
+    const p = document.createElementNS(NS, 'polygon');
+    p.setAttribute('points', tx + ',' + ty + ' ' + (tx - dir * 10) + ',' + (ty - 5.5)
+                   + ' ' + (tx - dir * 10) + ',' + (ty + 5.5));
+    p.setAttribute('fill', RED);
+    svg.appendChild(p);
+  };
+  const label = (x, y, text) => {
+    const d = document.createElement('div');
+    d.className = 'return-label vert';
+    d.style.left = x + 'px';
+    d.style.top = y + 'px';
+    d.textContent = text;
+    card.appendChild(d);
+  };
+
+  /* C：Filter 全部失败 → PostFilter（旁路进入，尖端触及 side-card 左边界） */
+  line('M ' + filter.right + ' ' + postf.cy + ' H ' + (postf.left - 10));
+  arrow(postf.left, postf.cy, 1);
+
+  /* A：PostFilter 抢占提名后重新入队 → 右侧留白槽上行 → 尖端触及 PreEnqueue 右边界 */
+  const xr = (sec1.right + card.clientWidth) / 2;
+  const yA = postf.cy - 30;
+  line('M ' + postf.right + ' ' + yA + ' H ' + xr + ' V ' + preenq.cy + ' H ' + (preenq.right + 10));
+  arrow(preenq.right, preenq.cy, -1);
+  label(xr - 9, (preenq.cy + yA) / 2 - 70, '调度失败重新入队');
+
+  /* B：PreBind / Bind 失败 → Unreserve → 左侧留白槽上行 → 尖端触及 PreEnqueue 左边界 */
+  const xl = sec1.left / 2;
+  const yB = preenq.cy + 24;
+  line('M ' + prebind.left + ' ' + prebind.cy + ' H ' + xl + ' V ' + yB + ' H ' + (preenq.left - 10));
+  arrow(preenq.left, yB, 1);
+  label(xl - 9, (yB + prebind.cy) / 2 - 100, '绑定失败 backoffQ 重试');
+
+  card.appendChild(svg);
+}
+window.addEventListener('load', layoutPaths);
+</script>
+</body>
+</html>
