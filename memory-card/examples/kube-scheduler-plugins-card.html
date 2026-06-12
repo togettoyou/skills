@@ -379,58 +379,52 @@
       <h3>标题</h3>
       <div class="title-item">
         <span class="ti-tag main">主</span>
-        <div class="ti-text" id="title-main">一个 Pod 的调度之旅：kube-scheduler 默认启用的 20 个插件与执行顺序</div>
+        <div class="ti-text" id="title-main">kube-scheduler 默认插件执行全景</div>
         <button class="copy-btn" onclick="copyText('title-main')">复制</button>
       </div>
       <div class="title-item">
         <span class="ti-tag">备选</span>
-        <div class="ti-text" id="title-alt1">从 PreEnqueue 到 PostBind：kube-scheduler 12 个扩展点的默认插件全景</div>
+        <div class="ti-text" id="title-alt1">kube-scheduler 12 个扩展点的默认插件全景</div>
         <button class="copy-btn" onclick="copyText('title-alt1')">复制</button>
       </div>
       <div class="title-item">
         <span class="ti-tag">备选</span>
-        <div class="ti-text" id="title-alt2">你背的调度插件清单可能过时了：v1.37 默认启用 20 个插件，新增 3 个</div>
+        <div class="ti-text" id="title-alt2">你背的 K8s 调度插件清单可能过时了</div>
         <button class="copy-btn" onclick="copyText('title-alt2')">复制</button>
       </div>
     </div>
 
     <div class="panel grow">
       <h3>正文（纯文本，可直接粘贴公众号）<button class="copy-btn" onclick="copyText('pub-body')">复制</button></h3>
-      <div id="pub-body">kube-scheduler 的所有调度策略都以插件实现，默认配置下到底启用了哪些插件，又按什么顺序执行，答案都写在 pkg/scheduler/apis/config/v1/default_plugins.go 里。本文基于 master 分支（v1.37 开发版）逐一核对。
+      <div id="pub-body">kube-scheduler 的调度策略都以插件实现，默认启用哪些、什么顺序，答案在 default_plugins.go，基于 v1.37 开发分支核对。
 
 一、默认插件从哪来
 
-默认插件全部通过 MultiPoint 一次性注册，基础清单 18 个，再按 feature gate 追加：DynamicResourceAllocation 已 GA 并锁定开启，DynamicResources 插件被插到 DefaultPreemption 之前；NodeDeclaredFeatures 从 1.36 起默认开启，追加到列表末尾。最终是 20 个插件。
-
-调度框架初始化时，expandMultiPointPlugins 函数把每个插件展开到它实现的扩展点上，扩展点内的执行顺序就是 MultiPoint 列表的注册顺序。打分插件未配置权重时默认为 1。
+默认插件全部经 MultiPoint 注册，基础 18 个，再按 feature gate 追加 DynamicResources 和 NodeDeclaredFeatures，共 20 个。框架初始化时把插件展开到各自实现的扩展点，点内顺序就是注册顺序。
 
 二、入队
 
-Pod 进入 activeQ 之前要先过 PreEnqueue 这道门禁，默认有三个插件：SchedulingGates 检查 spec.schedulingGates 是否清空；DynamicResources 确认 ResourceClaim 就绪；DefaultPreemption 拦截正在执行异步抢占的 Pod。任何一个不放行，Pod 就被门控进 unschedulableEntities（即此前的 unschedulablePods）等待事件触发重试。
+Pod 进入队列前要过 PreEnqueue 门禁：SchedulingGates 检查调度门控，DynamicResources 确认 ResourceClaim 就绪，DefaultPreemption 拦截异步抢占中的 Pod。
 
-注意，不只是新建 Pod，调度失败后重新入队同样要过 PreEnqueue。SchedulerPopFromBackoffQ 默认开启后，这次检查提前到进入 backoffQ 时执行，从 backoffQ 转入 activeQ 不再重复。
-
-进入 activeQ 后由唯一的 QueueSort 插件 PrioritySort 排序，优先级高的在前，相同优先级按入队时间先后。
+任一不放行就被门控进 unschedulableEntities 等事件重试，失败重新入队也要再过一遍。入队后由 PrioritySort 按优先级排序，同级按时间。
 
 三、调度周期
 
-调度周期串行执行，一次只处理一个 Pod。PreFilter 阶段 11 个插件做预处理和快速预判，比如 NodePorts 提前解析出 Pod 申请的端口列表。Filter 阶段 14 个插件对每个节点并发过滤，任何一个插件否决该节点就出局。可以看到顺序上把 NodeUnschedulable、NodeName 这类开销最小的放在最前面。
+调度周期串行执行。PreFilter 11 个插件做预处理和快速预判，Filter 14 个插件逐节点并发过滤，一票否决。
 
-如果所有节点都被过滤掉，就进入 PostFilter 旁路：先由 DynamicResources 尝试释放空闲的 ResourceClaim，再由 DefaultPreemption 执行抢占。源码注释解释了这个顺序，释放空闲资源比驱逐正在工作的 Pod 代价更低。
+全部节点被滤掉时进 PostFilter：先由 DynamicResources 释放空闲 ResourceClaim，再由 DefaultPreemption 抢占，释放比驱逐代价低。
 
-可行节点接着进入打分。PreScore 7 个插件准备状态，Score 9 个插件给每个节点打 0 到 100 分，再按权重加权求和：TaintToleration 权重 3，NodeAffinity、PodTopologySpread、InterPodAffinity、DynamicResources 权重 2，其余为 1。
+可行节点进入打分。PreScore 7 个插件准备状态，Score 9 个插件打分加权求和：TaintToleration 权重 3，NodeAffinity、PodTopologySpread、InterPodAffinity、DynamicResources 为 2，其余为 1。
 
-选出最高分节点后，assume 在调度缓存中预占资源，Reserve 阶段由 VolumeBinding 和 DynamicResources 预留卷与设备。Permit 阶段默认没有任何插件，直接放行。
+选出最高分节点，assume 在缓存预占资源，Reserve 预留卷与设备，Permit 默认无插件直接放行。
 
 四、绑定周期
 
-绑定要调用 API Server，相对耗时，所以放在独立 goroutine 异步执行，调度主循环立即去处理下一个 Pod。这正是前面 assume 预占资源的意义。
+绑定要调 API Server，放在独立 goroutine 异步执行，主循环立即处理下一个 Pod，这正是 assume 预占的意义。
 
-绑定周期依次经过 WaitOnPermit、PreBind、Bind、PostBind。PreBind 阶段 VolumeBinding 真正完成 PV 与 PVC 的绑定，DynamicResources 把分配结果写入 ResourceClaim；Bind 阶段 DefaultBinder 调用 pods/binding 子资源完成绑定；PostBind 默认无插件。PreBind 或 Bind 失败会触发 Unreserve 回滚，Pod 回到 backoffQ 等待重试。
+绑定周期依次是 WaitOnPermit、PreBind（VolumeBinding 绑定 PV，DynamicResources 写分配结果）、Bind（DefaultBinder 写 pods/binding）、PostBind，失败则 Unreserve 回滚回 backoffQ。
 
-可以看到，默认配置下 Permit 和 PostBind 是空的，它们是留给扩展的口子。gang scheduling 这类“凑齐一批再放行”的需求就落在 Permit 上，1.35 起树内也有了 alpha 的 GangScheduling 插件，默认关闭。
-
-与广为流传的 v1.2x 时代清单相比，这份默认配置多了三处变化：DynamicResources 默认启用且横跨 PreEnqueue、PreFilter、Filter、PostFilter、Score、Reserve、PreBind 七个扩展点；DefaultPreemption 因为异步抢占新增了 PreEnqueue；NodeDeclaredFeatures 成为新的默认过滤插件。背过旧清单的，可以对照卡片更新一版了。</div>
+对比旧清单有三处变化：DynamicResources 横跨七个扩展点；DefaultPreemption 新增 PreEnqueue；NodeDeclaredFeatures 加入默认过滤。</div>
     </div>
   </div>
 </div>
