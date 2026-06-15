@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>HAMi GPU 虚拟化原理</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<style>
+  :root {
+    --theme: #1A56DB;
+    --ink: #1A2B3C;
+    --gray: #5C6B7A;
+    --chip-bg: #1A3A6B;
+    --red: #C62828;
+    --red-bg: #FFEBEE;
+    --green: #2E7D32;
+    --s1-bg: #EEF2FF;
+    --s2-bg: #E3F2FD;
+    --s3-bg: #EBF3FF;
+    --s4-bg: #E8F5E9;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Microsoft YaHei', 'PingFang SC', 'Segoe UI', sans-serif;
+         background: #ECF0F8; color: var(--ink); }
+  .mono { font-family: Consolas, 'Courier New', monospace; }
+
+  html, body { height: 100%; }
+  .page { display: flex; gap: 24px; padding: 20px; height: 100vh; max-width: 1580px;
+          margin: 0 auto; overflow: hidden; }
+  .left  { flex: 0 0 auto; height: 100%; overflow-y: auto; overflow-x: hidden; padding-right: 14px; }
+  .right { flex: 1 1 0; min-width: 420px; height: 100%; display: flex;
+           flex-direction: column; gap: 14px; }
+
+  /* ── 卡片画布 ── */
+  #card {
+    width: 880px;
+    background-color: #FAFCFF;
+    background-image:
+      linear-gradient(rgba(26,86,219,.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(26,86,219,.04) 1px, transparent 1px);
+    background-size: 24px 24px;
+    border: 1.5px solid #B0C4E8;
+    border-radius: 18px;
+    padding: 22px 20px;
+  }
+
+  /* ── 标题区 ── */
+  .card-head { display: flex; align-items: center; gap: 14px; padding: 4px 8px 18px; }
+  .card-logo { width: 46px; height: 46px; border-radius: 10px; background: var(--theme);
+               display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .card-logo svg { width: 32px; height: 32px; }
+  .card-title { font-size: 24px; font-weight: bold; color: var(--theme); letter-spacing: 1px; }
+  .card-sub { font-size: 12px; color: var(--gray); margin-top: 4px;
+              font-family: Consolas, monospace; letter-spacing: .3px; }
+
+  /* ── 区块 ── */
+  .sec { border-radius: 14px; padding: 16px 18px; position: relative; }
+  .sec-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .sec-num { width: 26px; height: 26px; border-radius: 50%; color: #fff; font-weight: bold;
+             font-size: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .sec-title { font-size: 17px; font-weight: bold; font-family: Consolas, monospace; letter-spacing: .4px; }
+  .sec-note { margin-left: auto; font-size: 11px; color: var(--gray);
+              font-family: Consolas, monospace; background: rgba(255,255,255,.7);
+              padding: 2px 8px; border-radius: 4px; }
+
+  /* ── 白卡 ── */
+  .kcard { background: #fff; border: 1px solid #CDDAEE; border-radius: 10px; padding: 12px 14px; }
+  .kcard + .kcard { margin-top: 8px; }
+  .kcard-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .kcard-title { font-size: 15px; font-weight: bold; font-family: Consolas, monospace; }
+  .kcard-anno { font-size: 10.5px; color: var(--gray); font-family: Consolas, monospace;
+                background: #F0F4FF; padding: 1px 7px; border-radius: 4px; }
+
+  /* ── 标签 ── */
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+  .chip  { background: var(--chip-bg); color: #fff; font-family: Consolas, monospace;
+           font-size: 11.5px; padding: 4px 9px; border-radius: 5px; white-space: nowrap; }
+  .chip.red  { background: var(--red); }
+  .chip.gray { background: #607D8B; }
+  .chip.green { background: var(--green); }
+  .chip-sep { color: var(--gray); font-size: 13px; align-self: center; }
+
+  /* ── 旁注 ── */
+  .note { font-size: 11.5px; color: var(--gray); margin-top: 8px; line-height: 1.5; }
+  .note.warn { color: var(--red); }
+
+  /* ── 箭头 ── */
+  .flow-arrow { display: flex; justify-content: center; padding: 5px 0; }
+  .flow-arrow::after { content: ''; width: 0; height: 0;
+    border-left: 7px solid transparent; border-right: 7px solid transparent;
+    border-top: 10px solid var(--theme); }
+  .flow-arrow.line { position: relative; height: 24px; }
+  .flow-arrow.line::before { content: ''; position: absolute; top: 0; bottom: 10px;
+    left: 50%; width: 2px; margin-left: -1px; background: var(--theme); }
+  .big-arrow { display: flex; justify-content: center; padding: 10px 0; }
+  .big-arrow::after { content: ''; width: 0; height: 0;
+    border-left: 20px solid transparent; border-right: 20px solid transparent;
+    border-top: 24px solid var(--theme); }
+
+  /* ── 旁路卡 ── */
+  .with-side { display: flex; gap: 14px; align-items: stretch; }
+  .with-side .main-col { flex: 1 1 0; min-width: 0; }
+  .side-card { flex: 0 0 168px; background: var(--red-bg); border: 1.2px solid var(--red);
+               border-radius: 10px; padding: 14px 10px; text-align: center; align-self: center; }
+  .side-card .sc-title { color: var(--red); font-weight: bold; font-size: 12.5px;
+                         font-family: Consolas, monospace; word-break: break-all; }
+  .side-card .sc-eq { color: var(--red); font-size: 11px; margin: 3px 0 10px; }
+  .side-card .note { color: #B71C1C; margin-top: 8px; font-size: 10.5px; }
+
+  /* ── 成功徽章 ── */
+  .done-badge { display: flex; justify-content: center; margin-top: 14px; }
+  .done-badge span { background: var(--green); color: #fff; font-size: 15px; font-weight: bold;
+                     padding: 11px 38px; border-radius: 26px; letter-spacing: 1.5px; }
+
+  /* ── 页脚 ── */
+  .card-foot { text-align: center; font-size: 11px; color: var(--gray); padding-top: 14px;
+               font-family: Consolas, monospace; }
+
+  /* ── ENV 表格 ── */
+  .env-block { margin-top: 10px; }
+  .env-row { display: flex; align-items: baseline; gap: 8px; padding: 4px 0;
+             border-bottom: 1px solid #EEF2FF; font-family: Consolas, monospace; font-size: 10.5px; }
+  .env-row:last-child { border-bottom: none; }
+  .env-key { color: var(--theme); white-space: nowrap; flex: 0 0 auto; font-weight: bold; }
+  .env-val { color: var(--gray); flex: 1; }
+
+  /* ── 挂载列表 ── */
+  .mount-list { margin-top: 10px; }
+  .mount-row { display: flex; align-items: center; gap: 7px; padding: 4px 0;
+               border-bottom: 1px solid #EEF2FF; font-family: Consolas, monospace; font-size: 10.5px; }
+  .mount-row:last-child { border-bottom: none; }
+  .mount-src { color: var(--theme); }
+  .mount-arr { color: var(--gray); }
+  .mount-dst { color: var(--ink); }
+
+  /* ── 过滤检查网格 ── */
+  .check-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-top: 10px; }
+  .check-item { background: #F5F8FF; border: 1px solid #C5CAE9; border-radius: 7px;
+                padding: 6px 8px; font-family: Consolas, monospace; font-size: 10.5px;
+                text-align: center; color: var(--ink); line-height: 1.4; }
+  .check-item .ci-sub { display: block; font-size: 9px; color: var(--gray); margin-top: 2px; }
+  .check-item.fatal { border-color: #FFCDD2; background: #FFF8F8; color: var(--red); }
+
+  /* ── 运行时双栏 ── */
+  .mech-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 4px; }
+  .mech-card { background: #fff; border: 1px solid #C8E6C9; border-radius: 10px; padding: 13px 14px; }
+  .mech-title { font-family: Consolas, monospace; font-size: 13px; font-weight: bold;
+                color: #1B5E20; margin-bottom: 9px; padding-bottom: 7px;
+                border-bottom: 1.5px solid #A5D6A7; }
+  .mech-step { font-size: 11.5px; color: var(--ink); margin: 5px 0; padding-left: 14px;
+               position: relative; line-height: 1.5; }
+  .mech-step::before { content: '▸'; position: absolute; left: 0; color: #388E3C; font-size: 10px; top: 2px; }
+  .mech-step .mono { font-family: Consolas, monospace; font-size: 10.5px; }
+  .mech-result { font-size: 10.5px; font-weight: bold; margin-top: 8px;
+                 padding: 4px 9px; border-radius: 5px; font-family: Consolas, monospace; }
+  .mech-result.bad  { color: var(--red); background: #FFEBEE; }
+  .mech-result.good { color: var(--green); background: #E8F5E9; }
+
+  /* ═══ 右侧发布面板 ═══ */
+  .panel { background: #fff; border: 1px solid #E0E0E0; border-radius: 14px; padding: 20px; }
+  .panel.grow { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 0; }
+  .panel.grow #pub-body { flex: 1 1 0; min-height: 0; margin-top: 12px; }
+  .panel h3 { font-size: 15px; margin-bottom: 10px; display: flex; align-items: center; }
+  .copy-btn, .dl-btn { margin-left: auto; border: none; border-radius: 7px; padding: 6px 14px;
+       font-size: 12.5px; cursor: pointer; color: #fff; background: var(--theme); }
+  .copy-btn:hover, .dl-btn:hover { opacity: .85; }
+  .dl-row { display: flex; gap: 10px; align-items: center; }
+  .dl-row select { padding: 5px 8px; border-radius: 7px; border: 1px solid #CFD8DC; font-size: 12.5px; }
+  .title-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+       background: #FAFBFC; border: 1px solid #ECEFF1; border-radius: 8px; }
+  .title-item + .title-item { margin-top: 8px; }
+  .ti-tag { flex: 0 0 auto; font-size: 11px; color: #fff; background: var(--gray);
+       padding: 2px 8px; border-radius: 4px; }
+  .ti-tag.main { background: var(--theme); }
+  .ti-text { flex: 1 1 0; font-size: 13.5px; line-height: 1.5; }
+  .title-item .copy-btn { margin-left: 0; flex: 0 0 auto; padding: 4px 10px; }
+  #pub-body { white-space: pre-wrap; font-size: 13.5px; line-height: 1.8;
+       background: #FAFBFC; border: 1px solid #ECEFF1; border-radius: 8px; padding: 14px;
+       overflow-y: auto; }
+  .toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+       background: var(--ink); color: #fff; padding: 9px 22px; border-radius: 8px;
+       font-size: 13px; opacity: 0; transition: opacity .25s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ══════════ 左：记忆卡片 ══════════ -->
+  <div class="left">
+    <div id="card">
+
+      <!-- 标题 -->
+      <div class="card-head">
+        <div class="card-logo">
+          <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="6" y="6" width="20" height="20" rx="3" stroke="white" stroke-width="1.8"/>
+            <rect x="10" y="10" width="12" height="12" rx="1.5" fill="white" fill-opacity="0.9"/>
+            <line x1="6"  y1="11" x2="2"  y2="11" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="6"  y1="16" x2="2"  y2="16" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="6"  y1="21" x2="2"  y2="21" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="26" y1="11" x2="30" y2="11" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="26" y1="16" x2="30" y2="16" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="26" y1="21" x2="30" y2="21" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="11" y1="6"  x2="11" y2="2"  stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="16" y1="6"  x2="16" y2="2"  stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="21" y1="6"  x2="21" y2="2"  stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="11" y1="26" x2="11" y2="30" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="16" y1="26" x2="16" y2="30" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="21" y1="26" x2="21" y2="30" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div>
+          <div class="card-title">HAMi GPU 虚拟化原理</div>
+          <div class="card-sub">NVIDIA · hami-core 模式 · LD_PRELOAD 劫持链 · master@5dca58e · 2026-06-15</div>
+        </div>
+      </div>
+
+      <!-- ① 准入层 -->
+      <div class="sec" style="background:var(--s1-bg); border:1px solid #C5CAE9;">
+        <div class="sec-head">
+          <div class="sec-num" style="background:#3949AB">1</div>
+          <div class="sec-title" style="color:#3949AB">MutatingWebhook · 准入</div>
+          <div class="sec-note">webhook.go:53-109</div>
+        </div>
+        <div class="kcard">
+          <div class="kcard-row">
+            <span class="kcard-title">MutateAdmission()</span>
+            <span class="kcard-anno">webhook.go:81 · 按设备类型遍历容器</span>
+          </div>
+          <div class="note">为含 GPU 请求的 Pod 注入调度器名称，标准化资源请求字段<br>资源 key 按厂商独立配置，可通过 ConfigMap 覆盖默认值</div>
+          <div style="margin-top:10px; font-family:Consolas,monospace; font-size:11px; background:#F0F4FF; border:1px solid #C5CAE9; border-radius:8px; padding:10px 12px;">
+            <div style="color:var(--theme); font-weight:bold; margin-bottom:6px; font-size:10.5px; letter-spacing:.5px;">config/config.go:288 · 各厂商默认资源 key</div>
+            <div style="display:grid; grid-template-columns:auto 1fr 1fr 1fr; gap:4px 10px; align-items:baseline;">
+              <span style="color:var(--gray); font-size:10px;">厂商</span>
+              <span style="color:var(--gray); font-size:10px;">卡数</span>
+              <span style="color:var(--gray); font-size:10px;">显存</span>
+              <span style="color:var(--gray); font-size:10px;">算力</span>
+
+              <span style="color:#3949AB; font-weight:bold;">NVIDIA</span>
+              <span style="color:var(--theme);">nvidia.com/gpu</span>
+              <span style="color:var(--theme);">nvidia.com/gpumem</span>
+              <span style="color:var(--theme);">nvidia.com/gpucores</span>
+
+              <span style="color:#2E7D32; font-weight:bold;">Cambricon</span>
+              <span style="color:#388E3C;">cambricon.com/vmlu</span>
+              <span style="color:#388E3C;">…/mlu.smlu.vmemory</span>
+              <span style="color:#388E3C;">…/mlu.smlu.vcore</span>
+
+              <span style="color:#6A1B9A; font-weight:bold;">Hygon</span>
+              <span style="color:#7B1FA2;">hygon.com/dcunum</span>
+              <span style="color:#7B1FA2;">hygon.com/dcumem</span>
+              <span style="color:#7B1FA2;">hygon.com/dcucores</span>
+            </div>
+            <div style="margin-top:7px; color:var(--gray); font-size:10px;">其他：mthreads.com/vgpu · metax-tech.com/gpu · huawei.com/Ascend910A · iluvatar.ai/MR-V100-vgpu · ...</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="big-arrow"></div>
+
+      <!-- ② 调度层 -->
+      <div class="sec" style="background:var(--s2-bg); border:1px solid #BBDEFB;">
+        <div class="sec-head">
+          <div class="sec-num" style="background:var(--theme)">2</div>
+          <div class="sec-title" style="color:var(--theme)">hami-scheduler · Filter &amp; Bind</div>
+          <div class="sec-note">device.go:733</div>
+        </div>
+        <div class="kcard">
+          <div class="kcard-row">
+            <span class="kcard-title">Fit()</span>
+            <span class="kcard-anno">device.go:733-869 · 逐张卡六项检查</span>
+          </div>
+          <div class="check-grid">
+            <div class="check-item">
+              !dev.Health
+              <span class="ci-sub">卡不健康 → 跳过</span>
+            </div>
+            <div class="check-item fatal">
+              GPU 型号过滤
+              <span class="ci-sub">use/nouse-gputype</span>
+            </div>
+            <div class="check-item fatal">
+              UUID 过滤
+              <span class="ci-sub">use/nouse-gpuuuid</span>
+            </div>
+            <div class="check-item">
+              时间片耗尽
+              <span class="ci-sub">Count &lt;= Used</span>
+            </div>
+            <div class="check-item fatal">
+              显存不足
+              <span class="ci-sub">Totalmem-Usedmem &lt; req</span>
+            </div>
+            <div class="check-item fatal">
+              算力不足
+              <span class="ci-sub">Totalcore-Usedcores &lt; req</span>
+            </div>
+          </div>
+          <div class="chips" style="margin-top:10px">
+            <span class="chip gray">binpack 集中</span>
+            <span class="chip gray">spread 分散</span>
+            <span class="chip">NUMA 感知拓扑</span>
+          </div>
+        </div>
+        <div class="flow-arrow line" style="margin:8px 0"></div>
+        <div class="kcard">
+          <div class="kcard-row">
+            <span class="kcard-title">PatchAnnotations()</span>
+            <span class="kcard-anno">scheduler.go:795 · Filter 阶段写入</span>
+          </div>
+          <div class="note">选定 UUID + 分配显存 + 算力百分比，同时写两个注解：<br>
+<span class="mono" style="font-size:10.5px;color:var(--theme)">hami.io/vgpu-devices-to-allocate</span>（device plugin 读取）<br>
+<span class="mono" style="font-size:10.5px;color:var(--gray)">hami.io/vgpu-devices-allocated</span>（状态记录）</div>
+        </div>
+        <div class="flow-arrow line" style="margin:8px 0"></div>
+        <div class="kcard">
+          <div class="kcard-row">
+            <span class="kcard-title">Bind Extender</span>
+            <span class="kcard-anno">scheduler.go:667 · 实际节点绑定</span>
+          </div>
+          <div class="note">加 node lock → 写 <span class="mono" style="font-size:10.5px">device-bind-phase=allocating</span> → 调用 k8s <span class="mono" style="font-size:10.5px">Pods.Bind()</span> API</div>
+        </div>
+      </div>
+
+      <div class="big-arrow"></div>
+
+      <!-- ③ 设备分配层 -->
+      <div class="sec" style="background:var(--s3-bg); border:1px solid #BBCFE8;">
+        <div class="sec-head">
+          <div class="sec-num" style="background:#1565C0">3</div>
+          <div class="sec-title" style="color:#1565C0">Device Plugin · Allocate()</div>
+          <div class="sec-note">server.go:593-732</div>
+        </div>
+        <div class="with-side">
+          <div class="main-col">
+            <div class="kcard">
+              <div class="kcard-row">
+                <span class="kcard-title">ENV 注入</span>
+                <span class="kcard-anno">server.go:661-674</span>
+              </div>
+              <div class="env-block">
+                <div class="env-row">
+                  <span class="env-key">CUDA_DEVICE_MEMORY_LIMIT_{i}</span>
+                  <span class="env-val">= {mem}m （每张卡显存上限）</span>
+                </div>
+                <div class="env-row">
+                  <span class="env-key">CUDA_DEVICE_SM_LIMIT</span>
+                  <span class="env-val">= 0-100 （算力百分比）</span>
+                </div>
+                <div class="env-row">
+                  <span class="env-key">CUDA_DEVICE_MEMORY_SHARED_CACHE</span>
+                  <span class="env-val">= {hookPath}/{uuid}.cache</span>
+                </div>
+                <div class="env-row" style="margin-top:6px;padding-top:6px;border-top:1px dashed rgba(100,149,237,0.35)">
+                  <span class="env-key">NVIDIA_VISIBLE_DEVICES</span>
+                  <span class="env-val">= UUID,UUID,...（物理设备）</span>
+                  <span class="kcard-anno" style="margin-left:auto;font-size:9px;opacity:.75">server.go:877</span>
+                </div>
+              </div>
+            </div>
+            <div class="flow-arrow line" style="margin:8px 0"></div>
+            <div class="kcard">
+              <div class="kcard-row">
+                <span class="kcard-title">Mount 挂载</span>
+                <span class="kcard-anno">server.go:682-710</span>
+              </div>
+              <div class="mount-list">
+                <div class="mount-row">
+                  <span class="mount-src">libvgpu.so</span>
+                  <span class="mount-arr">→</span>
+                  <span class="mount-dst">{hookPath}/vgpu/libvgpu.so （RO）</span>
+                </div>
+                <div class="mount-row">
+                  <span class="mount-src">/etc/ld.so.preload</span>
+                  <span class="mount-arr">→</span>
+                  <span class="mount-dst">{hookPath}/vgpu/ld.so.preload （RO）</span>
+                </div>
+                <div class="mount-row">
+                  <span class="mount-src">/tmp/vgpulock</span>
+                  <span class="mount-arr">→</span>
+                  <span class="mount-dst">/tmp/vgpulock （进程锁目录）</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="side-card">
+            <div class="sc-title">CUDA_DISABLE_CONTROL</div>
+            <div class="sc-eq">= true</div>
+            <span class="chip red" style="font-size:10px">跳过 preload 挂载</span>
+            <div class="note" style="color:#B71C1C; margin-top:10px; font-size:10.5px">容器可主动退出<br>HAMi 运行时管控<br><br>server.go:694-711</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="big-arrow"></div>
+
+      <!-- ④ 运行时拦截 -->
+      <div class="sec" style="background:var(--s4-bg); border:1px solid #C8E6C9;">
+        <div class="sec-head">
+          <div class="sec-num" style="background:var(--green)">4</div>
+          <div class="sec-title" style="color:#1B5E20">libvgpu.so · CUDA API 劫持</div>
+          <div class="sec-note">libvgpu/ (git submodule → HAMi-core) · libvgpu.c:73</div>
+        </div>
+        <div class="mech-grid">
+          <div class="mech-card">
+            <div class="mech-title">显存隔离</div>
+            <div class="mech-step">
+              覆写 <span class="mono">dlsym()</span> 拦截符号查询
+              <span class="kcard-anno">libvgpu.c:73</span>
+            </div>
+            <div class="mech-step">
+              <span class="mono">cuMemAlloc_v2()</span>
+              <span class="kcard-anno">memory.c:135</span>
+            </div>
+            <div class="mech-step" style="padding-left:24px">
+              → <span class="mono">allocate_raw()</span> → <span class="mono">oom_check()</span>
+            </div>
+            <div class="mech-result bad">→ CUDA_ERROR_OUT_OF_MEMORY</div>
+            <div class="mech-step" style="margin-top:9px">
+              <span class="mono">nvmlDeviceGetMemoryInfo()</span>
+              <span class="kcard-anno">nvml/hook.c:372</span>
+            </div>
+            <div class="mech-result good">→ 覆写 total/free/used 为配额值</div>
+          </div>
+          <div class="mech-card">
+            <div class="mech-title">算力限流</div>
+            <div class="mech-step">
+              <span class="mono">cuLaunchKernel()</span>
+              <span class="kcard-anno">memory.c:556</span>
+            </div>
+            <div class="mech-step">
+              → <span class="mono">rate_limiter(grids, blocks)</span>
+              <span class="kcard-anno">watcher.c:39</span>
+            </div>
+            <div class="mech-step">
+              CAS 递减 <span class="mono">g_cur_cuda_cores[dev]</span>
+              <span class="kcard-anno">watcher.c:30</span>
+            </div>
+            <div class="mech-result bad">→ 计数器 &lt; 0 时 nanosleep 自旋</div>
+            <div class="mech-step" style="margin-top:9px">
+              utilization watcher → <span class="mono">change_token()</span>
+              <span class="kcard-anno">watcher.c:72</span>
+            </div>
+            <div class="mech-result good">→ 补充计数器，稳定在 SM_LIMIT %</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="done-badge"><span>GPU 虚拟化生效 · 对容器内所有进程透明</span></div>
+
+      <div class="card-foot">github.com/Project-HAMi/HAMi · master@5dca58e · 源码核对 2026-06-15</div>
+    </div>
+  </div>
+
+  <!-- ══════════ 右：发布内容 ══════════ -->
+  <div class="right">
+    <div class="panel">
+      <h3>下载卡片 PNG（无损）
+        <span class="dl-row" style="margin-left:auto">
+          <select id="dl-scale">
+            <option value="2">2× 高清</option>
+            <option value="3" selected>3× 超清</option>
+            <option value="4">4× 打印级</option>
+          </select>
+          <button class="dl-btn" onclick="downloadPNG()">下载 PNG</button>
+        </span>
+      </h3>
+      <div style="font-size:12px;color:var(--gray)">导出为无损 PNG；首次使用需联网加载 html2canvas。</div>
+    </div>
+
+    <div class="panel">
+      <h3>标题</h3>
+      <div class="title-item">
+        <span class="ti-tag main">主</span>
+        <div class="ti-text" id="title-main">HAMi 如何在不改驱动的前提下把一块 GPU 切成 N 份</div>
+        <button class="copy-btn" onclick="copyText('title-main')">复制</button>
+      </div>
+      <div class="title-item">
+        <span class="ti-tag">备选</span>
+        <div class="ti-text" id="title-alt1">K8s GPU 共享背后的真相：LD_PRELOAD 劫持 CUDA 全链路解析</div>
+        <button class="copy-btn" onclick="copyText('title-alt1')">复制</button>
+      </div>
+      <div class="title-item">
+        <span class="ti-tag">备选</span>
+        <div class="ti-text" id="title-alt2">GPU 算力/显存双维限流，HAMi 五步流水线原理图解</div>
+        <button class="copy-btn" onclick="copyText('title-alt2')">复制</button>
+      </div>
+    </div>
+
+    <div class="panel grow">
+      <h3>正文（纯文本，可直接粘贴公众号）<button class="copy-btn" onclick="copyText('pub-body')">复制</button></h3>
+      <div id="pub-body">HAMi 的 GPU 虚拟化不依赖驱动改动，通过纯用户态的 CUDA API 劫持，实现多容器共享一块物理 GPU，并严格隔离显存和算力配额。
+
+一、资源请求
+
+资源 key 按厂商独立配置。以 NVIDIA 为例，用户在 Pod 里写三个字段：nvidia.com/gpu 指定卡数，nvidia.com/gpumem 指定显存上限（MB），nvidia.com/gpucores 指定算力百分比（0-100）。Cambricon 对应 cambricon.com/vmlu，Hygon 对应 hygon.com/dcunum，华为昇腾对应 huawei.com/Ascend910A，均可通过 ConfigMap 覆盖默认值（config/config.go:288）。这些数字最终会变成容器内的环境变量，驱动运行时拦截机制生效。
+
+二、准入与调度
+
+Pod 提交时，MutatingWebhook（webhook.go:81）先拦截，为有 GPU 请求的 Pod 注入调度器名，并调用各设备类型的 MutateAdmission() 标准化资源字段。
+
+进入调度阶段，hami-scheduler 作为 kube-scheduler extender 被调用。Filter 接口（scheduler.go:738）内部对全部候选节点跑 Fit()（device.go:733）六项检查：健康状态、GPU 型号过滤、UUID 过滤、时间片是否耗尽、剩余显存是否够用、剩余算力核心是否够用。筛选和打分完成后，Filter 直接选出最优节点，调用 PatchAnnotations()（scheduler.go:795）把选定设备写入 Pod 的两个注解：hami.io/vgpu-devices-to-allocate（device plugin 后续读取）和 hami.io/vgpu-devices-allocated（状态记录），然后只把这一个节点返回给 kube-scheduler。Bind 接口（scheduler.go:667）随后负责加 node lock 并调用 k8s Pods.Bind() API 完成实际节点绑定，不再改动设备注解。
+
+三、设备分配
+
+kubelet 触发 Device Plugin 的 Allocate()（server.go:593）。它从 Annotation 里读出选定设备，注入三个关键环境变量：CUDA_DEVICE_MEMORY_LIMIT_{i} 设定每张卡的显存上限，CUDA_DEVICE_SM_LIMIT 设定算力百分比，CUDA_DEVICE_MEMORY_SHARED_CACHE 指向共享缓存文件路径。
+
+同时挂载两个文件进容器：libvgpu.so（拦截库本体）和 /etc/ld.so.preload（让 Linux 动态链接器在任意进程启动前优先加载该库）。若容器设置了 CUDA_DISABLE_CONTROL=true 则跳过 preload 注入，容器可完全退出 HAMi 的资源管控（server.go:694-711）。
+
+四、运行时隔离原理
+
+容器启动后，LD_PRELOAD 让 libvgpu.so 最先被加载，它通过 dlsym 重写以 cu 和 nvml 开头的 NVIDIA 库函数入口。
+
+显存隔离：拦截 cuMemAlloc 系列函数，若当前已用显存加申请量超过 CUDA_DEVICE_MEMORY_LIMIT_{i} 设定的配额，直接返回 CUDA_ERROR_OUT_OF_MEMORY；拦截 nvmlDeviceGetMemoryInfo，使 nvidia-smi 只显示配额值而非物理真实值。
+
+算力限流：拦截 cuLaunchKernel，每次提交 kernel 前消耗全局计数器 g_cur_cuda_cores，计数器耗尽时进程自旋等待；后台的 utilization watcher 线程持续测量实际 GPU 利用率，动态补充计数器，将容器算力稳定控制在 CUDA_DEVICE_SM_LIMIT 设定的百分比以内。
+
+五、精妙与局限
+
+这套机制对容器内所有进程透明生效，无需修改环境变量，对 nvidia 驱动零侵入，仅靠用户态库完成了显存和算力的双维度隔离。代价是：算力限制依赖自旋轮询，存在短时超配；依赖 LD_PRELOAD，静态链接的程序理论上可绕过管控。</div>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 1800);
+}
+function copyText(id) {
+  navigator.clipboard.writeText(document.getElementById(id).innerText)
+    .then(() => toast('已复制'))
+    .catch(() => toast('复制失败，请手动选择'));
+}
+function downloadPNG() {
+  const scale = parseInt(document.getElementById('dl-scale').value, 10);
+  const card  = document.getElementById('card');
+  toast('正在渲染 ' + scale + '× PNG…');
+  html2canvas(card, { scale, backgroundColor: '#FAFCFF', useCORS: true, logging: false })
+    .then(canvas => canvas.toBlob(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = (document.title || 'memory-card') + '@' + scale + 'x.png';
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast('已下载');
+    }, 'image/png'))
+    .catch(() => toast('渲染失败：请检查网络（html2canvas 未加载）'));
+}
+function layoutPaths() { /* 无回路 */ }
+window.addEventListener('load', layoutPaths);
+</script>
+</body>
+</html>
