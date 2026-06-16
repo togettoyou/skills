@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>记忆卡片 — Volcano 调度一次完整流程</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<style>
+  :root {
+    --theme: #326CE5;
+    --ink: #1A2B3C;
+    --gray: #5C6B7A;
+    --chip-bg: #2F4156;
+    --red: #D32F2F;
+    --red-bg: #FFEBEE;
+    --green: #2E7D32;
+    --stage-entry: #60717C;
+    --stage-entry-bg: #F1F4F6;
+    --stage-loop: #4F7FE8;
+    --stage-loop-bg: #EDF5FF;
+    --stage-enqueue: #1A9A8A;
+    --stage-enqueue-bg: #EAF7F5;
+    --stage-allocate: #D47A1F;
+    --stage-allocate-bg: #FFF6E8;
+    --stage-backfill: #7A63C8;
+    --stage-backfill-bg: #F5F0FF;
+    --stage-bind: #D94B4B;
+    --stage-bind-bg: #FFF0F0;
+    --stage-close: #6572C8;
+    --stage-close-bg: #F0F2FF;
+    --chip-action-bg: #00796B;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Microsoft YaHei', 'PingFang SC', 'Segoe UI', sans-serif;
+         background: #F0F2F5; color: var(--ink); }
+  .mono { font-family: Consolas, 'Courier New', monospace; }
+
+  html, body { height: 100%; }
+  .page { display: flex; gap: 24px; padding: 20px; height: 100vh; max-width: 1560px;
+          margin: 0 auto; overflow: hidden; }
+  .left { flex: 0 0 auto; height: 100%; overflow-y: auto; overflow-x: hidden; padding-right: 14px; }
+  .right { flex: 1 1 0; min-width: 420px; height: 100%; display: flex;
+           flex-direction: column; gap: 14px; }
+
+  #card { width: 880px; background: #fff; border: 1.5px solid #E0E0E0;
+          border-radius: 18px; padding: 22px 58px 22px 20px; position: relative; }
+
+  .card-head { display: flex; align-items: center; gap: 14px; padding: 4px 8px 18px;
+               border-bottom: 1px solid #ECEFF1; margin-bottom: 16px; }
+  .card-logo { width: 50px; height: 30px; border-radius: 8px; background: transparent;
+               color: #fff; display: flex; align-items: center; justify-content: center;
+               font-family: Consolas, monospace; font-weight: bold; font-size: 17px; flex: 0 0 auto; }
+  .card-logo svg { width: 50px; height: 26px; }
+  .card-title { font-size: 23px; font-weight: bold; color: var(--theme); letter-spacing: .5px; }
+  .card-sub { font-size: 12px; color: var(--gray); margin-top: 4px; font-family: Consolas, monospace; }
+
+  .sec { border-radius: 14px; padding: 16px 18px; position: relative; margin-bottom: 14px; }
+  .sec-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .sec-num { width: 26px; height: 26px; border-radius: 50%; color: #fff; font-weight: bold;
+             font-size: 14px; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+  .sec-title { font-size: 17.5px; font-weight: bold; }
+  .sec-note { margin-left: auto; font-size: 11px; color: var(--gray); font-family: Consolas, monospace; }
+
+  .kcard { background: #fff; border: 1px solid #CFD8DC; border-radius: 10px;
+           padding: 11px 14px; }
+  .kcard-title { font-size: 14.5px; font-weight: bold; font-family: Consolas, monospace; color: var(--ink); }
+  .kcard-anno { font-size: 11px; color: var(--gray); font-weight: normal; margin-left: 8px; font-family: Consolas, monospace; }
+  .kcard-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 8px; align-items: center; }
+  .chip { background: var(--chip-bg); color: #fff; font-family: Consolas, monospace;
+          font-size: 11px; padding: 4px 9px; border-radius: 5px; white-space: nowrap; }
+  .chip.red { background: var(--red); }
+  .chip.action { background: var(--chip-action-bg); }
+  .chip.tag { background: #90A4AE; font-size: 10px; }
+  .chip-sep { color: var(--gray); font-size: 13px; align-self: center; }
+
+  .note { font-size: 11.5px; color: var(--gray); margin-top: 8px; line-height: 1.55; }
+  .note.warn { color: var(--red); }
+  .note .loc { color: #90A4AE; font-family: Consolas, monospace; }
+
+  .flow-arrow { display: flex; justify-content: center; padding: 4px 0; }
+  .flow-arrow::after { content: ''; width: 0; height: 0;
+       border-left: 7px solid transparent; border-right: 7px solid transparent;
+       border-top: 10px solid var(--theme); }
+  .flow-arrow.line { position: relative; height: 22px; }
+  .flow-arrow.line::before { content: ''; position: absolute; top: 0; bottom: 10px;
+       left: 50%; width: 2px; margin-left: -1px; background: var(--theme); }
+
+  .big-arrow { display: flex; justify-content: center; padding: 6px 0 10px; }
+  .big-arrow::after { content: ''; width: 0; height: 0;
+       border-left: 16px solid transparent; border-right: 16px solid transparent;
+       border-top: 18px solid var(--theme); }
+
+  .with-side { display: flex; gap: 14px; align-items: stretch; }
+  .with-side .main-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+  .side-card { flex: 0 0 168px; background: var(--red-bg); border: 1.2px solid var(--red);
+               border-radius: 10px; padding: 12px 10px; text-align: center; align-self: center; }
+  .side-card .sc-title { color: var(--red); font-weight: bold; font-size: 13.5px;
+                         font-family: Consolas, monospace; }
+  .side-card .sc-sub { color: var(--red); font-size: 10.5px; margin: 2px 0 8px; }
+  .side-card .note { color: #B71C1C; margin-top: 6px; }
+  .side-card .chip { display: inline-block; }
+
+  .done-badge { display: flex; justify-content: center; margin-top: 6px; margin-bottom: 8px; }
+  .done-badge span { background: var(--green); color: #fff; font-size: 15px; font-weight: bold;
+                     padding: 9px 36px; border-radius: 26px; }
+
+  .card-foot { text-align: center; font-size: 10.5px; color: var(--gray); padding-top: 10px; line-height: 1.6; }
+
+  #path-layer { position: absolute; inset: 0; pointer-events: none; }
+  #path-layer svg { position: absolute; inset: 0; overflow: visible; }
+  .return-path { position: absolute; pointer-events: none; }
+  .return-path.v { border-left: 2px dashed var(--red); width: 0; }
+  .return-path.h { border-top: 2px solid var(--red); height: 0; }
+  .return-arrow { position: absolute; width: 0; height: 0; }
+  .return-arrow.up { border-left: 6px solid transparent; border-right: 6px solid transparent;
+                     border-bottom: 9px solid var(--red); }
+  .return-arrow.left { border-top: 6px solid transparent; border-bottom: 6px solid transparent;
+                       border-right: 9px solid var(--red); }
+  .return-label { position: absolute; color: var(--red); font-size: 11px;
+                  background: #fff; padding: 3px 6px; border-radius: 4px; white-space: normal;
+                  line-height: 1.35; text-align: center; box-shadow: 0 0 0 1px rgba(211,47,47,.12); }
+  .return-label.vert { writing-mode: vertical-rl; text-orientation: mixed; width: 30px;
+                       min-height: 156px; white-space: nowrap; letter-spacing: 1px;
+                       display: flex; align-items: center; justify-content: center; }
+
+  .panel { background: #fff; border: 1px solid #E0E0E0; border-radius: 14px; padding: 20px; }
+  .panel.grow { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+  .panel.grow #pub-body { flex: 1 1 0; min-height: 0; }
+  .panel h3 { font-size: 15px; margin-bottom: 10px; display: flex; align-items: center; }
+  .copy-btn, .dl-btn { margin-left: auto; border: none; border-radius: 7px; padding: 6px 14px;
+       font-size: 12.5px; cursor: pointer; color: #fff; background: var(--theme); }
+  .copy-btn:hover, .dl-btn:hover { opacity: .85; }
+  .dl-row { display: flex; gap: 10px; align-items: center; }
+  .dl-row select { padding: 5px 8px; border-radius: 7px; border: 1px solid #CFD8DC; font-size: 12.5px; }
+  .title-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+       background: #FAFBFC; border: 1px solid #ECEFF1; border-radius: 8px; }
+  .title-item + .title-item { margin-top: 8px; }
+  .ti-tag { flex: 0 0 auto; font-size: 11px; color: #fff; background: var(--gray);
+       padding: 2px 8px; border-radius: 4px; }
+  .ti-tag.main { background: var(--theme); }
+  .ti-text { flex: 1 1 0; font-size: 13.5px; line-height: 1.5; }
+  .title-item .copy-btn { margin-left: 0; flex: 0 0 auto; padding: 4px 10px; }
+  #pub-body { white-space: pre-wrap; font-size: 13.5px; line-height: 1.8;
+       background: #FAFBFC; border: 1px solid #ECEFF1; border-radius: 8px; padding: 14px;
+       overflow-y: auto; }
+  .toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+       background: var(--ink); color: #fff; padding: 9px 22px; border-radius: 8px;
+       font-size: 13px; opacity: 0; transition: opacity .25s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body data-theme="blueprint">
+<div class="page">
+
+  <!-- ===================== 左：记忆卡片 ===================== -->
+  <div class="left">
+    <div id="card">
+
+      <div class="card-head">
+        <div class="card-logo">
+          <svg viewBox="0 0 84 40" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="logoGrad" gradientUnits="userSpaceOnUse" x1="40.8801" y1="40" x2="40.8801" y2="0">
+                <stop offset="0" stop-color="#EB5520"/>
+                <stop offset="0.2473" stop-color="#EB511F"/>
+                <stop offset="0.5034" stop-color="#EB441D"/>
+                <stop offset="0.7627" stop-color="#EB301A"/>
+                <stop offset="1" stop-color="#EB1616"/>
+              </linearGradient>
+            </defs>
+            <path fill="url(#logoGrad)" d="M34.3,11L29,5.7c-0.1-0.1-0.1-0.3,0-0.4l5.3-5.3c0.1-0.1,0.3-0.1,0.4,0l5.3,5.3c0.1,0.1,0.1,0.3,0,0.4
+              L34.7,11C34.6,11.1,34.4,11.1,34.3,11z M32.9,11.8l-4.6-4.6C28.1,7,28,7,27.9,7.1l-4.6,4.6c-0.1,0.1-0.1,0.3,0,0.4l4.6,4.6
+              c0.1,0.1,0.3,0.1,0.4,0l4.6-4.6C33,12,33,11.9,32.9,11.8z M45.7,11.8l-4.6-4.6C41,7,40.8,7,40.7,7.1l-4.6,4.6
+              c-0.1,0.1-0.1,0.3,0,0.4l4.6,4.6c0.1,0.1,0.3,0.1,0.4,0l4.6-4.6C45.8,12,45.8,11.9,45.7,11.8z M25.8,18.2l-4-4
+              c-0.1-0.1-0.3-0.1-0.4,0l-4,4c-0.1,0.1-0.1,0.3,0,0.4l4,4c0.1,0.1,0.3,0.1,0.4,0l4-4C25.9,18.4,25.9,18.3,25.8,18.2z M38.7,18.2
+              l-4-4c-0.1-0.1-0.3-0.1-0.4,0l-4,4c-0.1,0.1-0.1,0.3,0,0.4l4,4c0.1,0.1,0.3,0.1,0.4,0l4-4C38.8,18.4,38.8,18.3,38.7,18.2z
+              M51.5,18.2l-4-4c-0.1-0.1-0.3-0.1-0.4,0l-4,4c-0.1,0.1-0.1,0.3,0,0.4l4,4c0.1,0.1,0.3,0.1,0.4,0l4-4
+              C51.6,18.4,51.6,18.3,51.5,18.2z M18.8,24.6l-3.4-3.4c-0.1-0.1-0.3-0.1-0.4,0l-3.4,3.4c-0.1,0.1-0.1,0.3,0,0.4l3.4,3.4
+              c0.1,0.1,0.3,0.1,0.4,0l3.4-3.4C18.9,24.9,18.9,24.7,18.8,24.6z M31.6,24.6l-3.4-3.4c-0.1-0.1-0.3-0.1-0.4,0l-3.4,3.4
+              c-0.1,0.1-0.1,0.3,0,0.4l3.4,3.4c0.1,0.1,0.3,0.1,0.4,0l3.4-3.4C31.7,24.9,31.7,24.7,31.6,24.6z M44.5,24.6l-3.4-3.4
+              c-0.1-0.1-0.3-0.1-0.4,0l-3.4,3.4c-0.1,0.1-0.1,0.3,0,0.4l3.4,3.4c0.1,0.1,0.3,0.1,0.4,0l3.4-3.4C44.6,24.9,44.6,24.7,44.5,24.6z
+              M57.3,24.6l-3.4-3.4c-0.1-0.1-0.3-0.1-0.4,0l-3.4,3.4c-0.1,0.1-0.1,0.3,0,0.4l3.4,3.4c0.1,0.1,0.3,0.1,0.4,0l3.4-3.4
+              C57.4,24.9,57.4,24.7,57.3,24.6z M11.8,31L9,28.2c-0.1-0.1-0.3-0.1-0.4,0L5.9,31c-0.1,0.1-0.1,0.3,0,0.4l2.8,2.8
+              c0.1,0.1,0.3,0.1,0.4,0l2.8-2.8C11.9,31.3,11.9,31.1,11.8,31z M24.6,31l-2.8-2.8c-0.1-0.1-0.3-0.1-0.4,0L18.7,31
+              c-0.1,0.1-0.1,0.3,0,0.4l2.8,2.8c0.1,0.1,0.3,0.1,0.4,0l2.8-2.8C24.7,31.3,24.7,31.1,24.6,31z M37.4,31l-2.8-2.8
+              c-0.1-0.1-0.3-0.1-0.4,0L31.5,31c-0.1,0.1-0.1,0.3,0,0.4l2.8,2.8c0.1,0.1,0.3,0.1,0.4,0l2.8-2.8C37.5,31.3,37.5,31.1,37.4,31z
+              M50.2,31l-2.8-2.8c-0.1-0.1-0.3-0.1-0.4,0L44.3,31c-0.1,0.1-0.1,0.3,0,0.4l2.8,2.8c0.1,0.1,0.3,0.1,0.4,0l2.8-2.8
+              C50.3,31.3,50.3,31.1,50.2,31z M63.1,31l-2.8-2.8c-0.1-0.1-0.3-0.1-0.4,0L57.2,31c-0.1,0.1-0.1,0.3,0,0.4l2.8,2.8
+              c0.1,0.1,0.3,0.1,0.4,0l2.8-2.8C63.2,31.3,63.2,31.1,63.1,31z M4.7,37.4l-2.1-2.1c-0.1-0.1-0.3-0.1-0.4,0l-2.1,2.1
+              c-0.1,0.1-0.1,0.3,0,0.4l2.1,2.1c0.1,0.1,0.3,0.1,0.4,0l2.1-2.1C4.8,37.7,4.8,37.5,4.7,37.4z M17.5,37.4l-2.1-2.1
+              c-0.1-0.1-0.3-0.1-0.4,0l-2.1,2.1c-0.1,0.1-0.1,0.3,0,0.4l2.1,2.1c0.1,0.1,0.3,0.1,0.4,0l2.1-2.1C17.6,37.7,17.6,37.5,17.5,37.4z
+              M30.4,37.4l-2.1-2.1c-0.1-0.1-0.3-0.1-0.4,0l-2.1,2.1c-0.1,0.1-0.1,0.3,0,0.4l2.1,2.1c0.1,0.1,0.3,0.1,0.4,0l2.1-2.1
+              C30.5,37.7,30.5,37.5,30.4,37.4z M43.2,37.4l-2.1-2.1c-0.1-0.1-0.3-0.1-0.4,0l-2.1,2.1c-0.1,0.1-0.1,0.3,0,0.4l2.1,2.1
+              c0.1,0.1,0.3,0.1,0.4,0l2.1-2.1C43.3,37.6,43.3,37.5,43.2,37.4z M56,37.4l-2.1-2.1c-0.1-0.1-0.3-0.1-0.4,0l-2.1,2.1
+              c-0.1,0.1-0.1,0.3,0,0.4l2.1,2.1c0.1,0.1,0.3,0.1,0.4,0l2.1-2.1C56.1,37.6,56.1,37.5,56,37.4z M68.9,37.4l-2.1-2.1
+              c-0.1-0.1-0.3-0.1-0.4,0l-2.1,2.1c-0.1,0.1-0.1,0.3,0,0.4l2.1,2.1c0.1,0.1,0.3,0.1,0.4,0l2.1-2.1C69,37.6,69,37.5,68.9,37.4z
+              M47.5,11l5.3-5.3c0.1-0.1,0.1-0.3,0-0.4l-5.3-5.3c-0.1-0.1-0.3-0.1-0.4,0l-5.3,5.3c-0.1,0.1-0.1,0.3,0,0.4l5.3,5.3
+              C47.2,11.1,47.4,11.1,47.5,11z M53.9,16.8l4.6-4.6c0.1-0.1,0.1-0.3,0-0.4l-4.6-4.6c-0.1-0.1-0.3-0.1-0.4,0l-4.6,4.6
+              c-0.1,0.1-0.1,0.3,0,0.4l4.6,4.6C53.6,16.9,53.8,16.9,53.9,16.8z M60.3,22.6l4-4c0.1-0.1,0.1-0.3,0-0.4l-4-4
+              c-0.1-0.1-0.3-0.1-0.4,0l-4,4c-0.1,0.1-0.1,0.3,0,0.4l4,4C60,22.7,60.2,22.7,60.3,22.6z M66.7,28.3l3.4-3.4
+              c0.1-0.1,0.1-0.3,0-0.4l-3.4-3.4c-0.1-0.1-0.3-0.1-0.4,0L63,24.6c-0.1,0.1-0.1,0.3,0,0.4l3.4,3.4C66.4,28.5,66.6,28.5,66.7,28.3z
+              M73.1,34.1l2.8-2.8c0.1-0.1,0.1-0.3,0-0.4l-2.8-2.8c-0.1-0.1-0.3-0.1-0.4,0L70,31c-0.1,0.1-0.1,0.3,0,0.4l2.8,2.8
+              C72.9,34.2,73,34.2,73.1,34.1z M79.6,39.9l2.1-2.1c0.1-0.1,0.1-0.3,0-0.4l-2.1-2.1c-0.1-0.1-0.3-0.1-0.4,0L77,37.4
+              c-0.1,0.1-0.1,0.3,0,0.4l2.1,2.1C79.3,40,79.4,40,79.6,39.9z"/>
+          </svg>
+        </div>
+        <div>
+          <div class="card-title">Volcano 调度一次完整流程</div>
+          <div class="card-sub">scheduler runOnce 代码走读 · volcano.sh/volcano master@8e7c43a9f · 2026-06-16 核实</div>
+        </div>
+      </div>
+
+      <!-- 0 入口与配置 -->
+      <div class="sec" style="background: var(--stage-entry-bg)">
+        <div class="sec-head">
+          <div class="sec-num" style="background:var(--stage-entry)">0</div>
+          <div class="sec-title" style="color:var(--stage-entry)">入口注册与默认配置</div>
+          <div class="sec-note">cmd/scheduler/main.go : 39-40</div>
+        </div>
+        <div class="kcard">
+          <span class="kcard-title">init()</span><span class="kcard-anno">空导入触发 actions / plugins 包注册</span>
+          <div class="chips">
+            <span class="chip action">reclaim</span><span class="chip-sep">/</span>
+            <span class="chip action">allocate</span><span class="chip-sep">/</span>
+            <span class="chip action">backfill</span><span class="chip-sep">/</span>
+            <span class="chip action">preempt</span><span class="chip-sep">/</span>
+            <span class="chip action">gangpreempt</span><span class="chip-sep">/</span>
+            <span class="chip action">gangreclaim</span><span class="chip-sep">/</span>
+            <span class="chip action">enqueue</span><span class="chip-sep">/</span>
+            <span class="chip action">shuffle</span>
+          </div>
+          <div class="note">这里完成 <span class="mono">RegisterAction</span> 与 <span class="mono">RegisterPluginBuilder</span> 注册；执行哪些 action 由调度配置决定 <span class="loc">actions/factory.go:36-43</span></div>
+        </div>
+        <div class="flow-arrow line"></div>
+        <div class="kcard">
+          <span class="kcard-title">DefaultSchedulerConf</span><span class="kcard-anno">pkg/scheduler/util.go : 38-50</span>
+          <div class="kcard-row" style="margin-top:8px">
+            <span class="chip tag">actions</span>
+            <span class="chip action">enqueue</span><span class="chip-sep">→</span>
+            <span class="chip action">allocate</span><span class="chip-sep">→</span>
+            <span class="chip action">backfill</span>
+          </div>
+          <div class="chips">
+            <span class="chip tag">Tier 1</span>
+            <span class="chip">priority</span><span class="chip-sep">→</span>
+            <span class="chip">gang</span><span class="chip-sep">→</span>
+            <span class="chip">conformance</span>
+          </div>
+          <div class="chips">
+            <span class="chip tag">Tier 2</span>
+            <span class="chip">overcommit</span><span class="chip-sep">→</span>
+            <span class="chip">drf</span><span class="chip-sep">→</span>
+            <span class="chip">predicates</span><span class="chip-sep">→</span>
+            <span class="chip">proportion</span><span class="chip-sep">→</span>
+            <span class="chip">nodeorder</span>
+          </div>
+          <div class="note">默认配置只确定 action 顺序与插件 Tier 顺序；插件函数在 <span class="mono">OpenSession</span> 后参与后续调度判断</div>
+        </div>
+        <div class="flow-arrow line"></div>
+        <div class="kcard">
+          <span class="kcard-title">插件参与位置</span><span class="kcard-anno">OnSessionOpen → Session</span>
+          <div class="chips">
+            <span class="chip action">enqueue</span>
+            <span class="chip">QueueOrderFn</span><span class="chip-sep">/</span>
+            <span class="chip">JobOrderFn</span><span class="chip-sep">/</span>
+            <span class="chip">JobEnqueueable</span><span class="chip-sep">/</span>
+            <span class="chip">JobEnqueued</span>
+          </div>
+          <div class="chips">
+            <span class="chip action">allocate / backfill</span>
+            <span class="chip">JobValid</span><span class="chip-sep">/</span>
+            <span class="chip">JobReady</span><span class="chip-sep">/</span>
+            <span class="chip">Allocatable</span><span class="chip-sep">/</span>
+            <span class="chip">Predicate</span><span class="chip-sep">/</span>
+            <span class="chip">NodeOrder</span>
+          </div>
+          <div class="note"><span class="mono">enqueue</span> 使用准入与排序函数；<span class="mono">allocate</span> / <span class="mono">backfill</span> 使用校验、过滤、评分和 <span class="mono">JobReady</span> 相关函数 <span class="loc">session_plugins.go</span></div>
+        </div>
+      </div>
+
+      <div class="big-arrow"></div>
+
+      <!-- 1 主循环 -->
+      <div class="sec" style="background: var(--stage-loop-bg)" id="loop-target">
+        <div class="sec-head">
+          <div class="sec-num" style="background:var(--stage-loop)">1</div>
+          <div class="sec-title" style="color:var(--stage-loop)">runOnce 主循环（默认 1s 间隔）</div>
+          <div class="sec-note">scheduler.go : 124-153</div>
+        </div>
+        <div class="kcard">
+          <span class="kcard-title">OpenSession</span><span class="kcard-anno">framework.go : 34-60</span>
+          <div class="note">先 <span class="mono">cache.Snapshot()</span>：Nodes / Queues / Jobs 走 <span class="mono">Clone</span>；HyperNodes、分层集合与真实节点集合由 <span class="mono">HyperNodesInfo</span> 返回深拷贝 <span class="loc">cache.go:1478-1587</span></div>
+        </div>
+        <div class="flow-arrow line"></div>
+        <div class="kcard">
+          <span class="kcard-title">OnSessionOpen</span><span class="kcard-anno">framework.go : 42-56</span>
+          <div class="note">按 Tier 顺序实例化插件，插件把排序、准入、过滤、评分、JobReady 等函数注册进 Session；后续 action 在对应位置使用这些函数</div>
+        </div>
+        <div class="flow-arrow line"></div>
+        <div class="kcard">
+          <span class="kcard-title">for action : actions { action.Execute(ssn) }</span><span class="kcard-anno">scheduler.go : 148-152</span>
+          <div class="kcard-row" style="margin-top:8px; justify-content:center">
+            <span class="chip action">enqueue</span><span class="chip-sep">→</span>
+            <span class="chip action">allocate</span><span class="chip-sep">→</span>
+            <span class="chip action">backfill</span>
+          </div>
+          <div class="note" style="text-align:center">按配置切片顺序逐个调用；Pod Binding 由 cache 后台流程处理</div>
+        </div>
+      </div>
+
+      <div class="big-arrow"></div>
+
+      <!-- 2 enqueue -->
+      <div class="sec" style="background: var(--stage-enqueue-bg)">
+        <div class="sec-head">
+          <div class="sec-num" style="background:var(--stage-enqueue)">2</div>
+          <div class="sec-title" style="color:var(--stage-enqueue)">enqueue：PodGroup 进入队列</div>
+          <div class="sec-note">actions/enqueue/enqueue.go : 44-103</div>
+        </div>
+        <div class="kcard">
+          <span class="kcard-title">Pending jobs by queue</span><span class="kcard-anno">:48-76</span>
+          <div class="note">遍历 <span class="mono">ssn.Jobs</span>，把 <span class="mono">job.IsPending()</span> 的 Job 按 Queue 分组，Queue 和 Job 都用对应的 order 函数放入优先队列</div>
+        </div>
+        <div class="flow-arrow line"></div>
+        <div class="kcard">
+          <span class="kcard-title">JobEnqueueable → JobEnqueued</span><span class="kcard-anno">:81-103</span>
+          <div class="note"><span class="mono">MinResources</span> 为空，或 <span class="mono">ssn.JobEnqueueable(job)</span> 通过时，调用 <span class="mono">ssn.JobEnqueued(job)</span>，并把 <span class="mono">PodGroup.Status.Phase</span> 置为 <span class="mono">Inqueue</span></div>
+        </div>
+        <div class="note" style="text-align:center">没有进入 <span class="mono">Inqueue</span> 的 Job，默认 <span class="mono">allocate</span> 会跳过 <span class="loc">allocate.go:156-164</span></div>
+      </div>
+
+      <div class="big-arrow"></div>
+
+      <!-- 3 allocate -->
+      <div class="sec" style="background: var(--stage-allocate-bg)">
+        <div class="sec-head">
+          <div class="sec-num" style="background:var(--stage-allocate)">3</div>
+          <div class="sec-title" style="color:var(--stage-allocate)">allocate：任务级决策链</div>
+          <div class="sec-note">actions/allocate/allocate.go</div>
+        </div>
+        <div class="with-side">
+          <div class="main-col">
+            <div class="kcard">
+              <span class="kcard-title">Allocatable(queue, task)</span><span class="kcard-anno">:744</span>
+              <div class="note">调用已注册的 <span class="mono">AllocatableFn</span>；默认 <span class="mono">proportion</span> 检查队列状态与 deserved 资源。BestEffort task 在 <span class="mono">allocate</span> 被跳过 <span class="loc">:265-270</span></div>
+            </div>
+            <div class="flow-arrow line"></div>
+            <div class="kcard">
+              <span class="kcard-title">PrePredicateFn → PredicateNodes</span><span class="kcard-anno">:779-806</span>
+              <div class="note">先试 <span class="mono">Pod.Status.NominatedNodeName</span>（抢占遗留候选），未命中再对候选节点跑过滤；扩展点按 Tier 顺序，只调用已注册函数</div>
+            </div>
+            <div class="flow-arrow line"></div>
+            <div class="kcard">
+              <span class="kcard-title">prioritizeNodes</span><span class="kcard-anno">:880-948</span>
+              <div class="chips">
+                <span class="chip">当前 shard 空闲</span><span class="chip-sep">→</span>
+                <span class="chip">其他 shard 空闲</span><span class="chip-sep">→</span>
+                <span class="chip">当前 shard 待释放</span><span class="chip-sep">→</span>
+                <span class="chip">其他 shard 待释放</span>
+              </div>
+              <div class="note">先用当前空闲资源，soft sharding 下再考虑其他 shard；空闲不够时才看 <span class="mono">FutureIdle</span>（Idle + Releasing - Pipelined）。候选组内再由 NodeOrder 评分</div>
+            </div>
+            <div class="flow-arrow line"></div>
+            <div class="kcard">
+              <span class="kcard-title">stmt.Allocate / stmt.Pipeline</span><span class="kcard-anno">:951-981</span>
+              <div class="note">Idle 够用 → <span class="mono">Allocate</span>；只有 FutureIdle 够用（要等别的 task 释放） → <span class="mono">Pipeline</span></div>
+            </div>
+          </div>
+          <div class="side-card">
+            <div class="sc-title">无可用节点</div>
+            <div class="sc-sub">PredicateNodes 为空</div>
+            <span class="chip red">NodesFitErrors</span>
+            <div class="note">跳过该 task；gang 未满足则中断该 job 的本轮分配 <span class="loc">:808-827</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="big-arrow"></div>
+
+      <!-- 4 backfill -->
+      <div class="sec" style="background: var(--stage-backfill-bg)">
+        <div class="sec-head">
+          <div class="sec-num" style="background:var(--stage-backfill)">4</div>
+          <div class="sec-title" style="color:var(--stage-backfill)">backfill：BestEffort 任务</div>
+          <div class="sec-note">actions/backfill/backfill.go : 58-112,120-170</div>
+        </div>
+        <div class="kcard">
+          <span class="kcard-title">backfill.Execute</span>
+          <div class="note">按 action 顺序，<span class="mono">backfill</span> 在 <span class="mono">allocate</span> 之后执行。它跳过仍是 Pending 的 Job，在其余 Job 中挑 Pending / Pipelined 的 BestEffort task；Pipelined task 会先 <span class="mono">UnPipeline</span></div>
+        </div>
+        <div class="note" style="text-align:center">不走本 action 的 <span class="mono">Statement.Commit</span>；<span class="mono">JobReady</span> 后仍会 <span class="mono">dispatch → AddBindTask</span>，进入同一个异步绑定队列 <span class="loc">session.go:791-807</span></div>
+      </div>
+
+      <div class="big-arrow"></div>
+
+      <!-- 5 async binding -->
+      <div class="sec" style="background: var(--stage-bind-bg)">
+        <div class="sec-head">
+          <div class="sec-num" style="background:var(--stage-bind)">5</div>
+          <div class="sec-title" style="color:var(--stage-bind)">异步旁路：Pod Binding</div>
+          <div class="sec-note">framework/statement.go · cache/cache.go</div>
+        </div>
+        <div class="kcard">
+          <span class="kcard-title">AddBindTask 的两个入口</span>
+          <div class="note"><span class="mono">allocate</span>：<span class="mono">stmt.Commit</span> 提交 Allocate 操作时调用 <span class="mono">s.allocate(task)</span>。<span class="mono">backfill</span>：<span class="mono">ssn.Allocate</span> 在 <span class="mono">JobReady</span> 后调用 <span class="mono">dispatch</span>。两条路径最终都调用 <span class="mono">cache.AddBindTask</span></div>
+        </div>
+        <div class="flow-arrow line"></div>
+        <div class="kcard">
+          <span class="kcard-title">AddBindTask</span><span class="kcard-anno">cache.go : 1342-1377</span>
+          <div class="note">task 状态置为 <span class="mono">Binding</span>，写入容量 5000 的 <span class="mono">BindFlowChannel</span> <span class="loc">cache.go:454</span></div>
+        </div>
+        <div class="flow-arrow line"></div>
+        <div class="kcard">
+          <span class="kcard-title">processBindTask</span><span class="kcard-anno">cache.go : 1379-1403，每 20ms 调用</span>
+          <div class="note">读到 <span class="mono">batchNum</span> 个会触发 <span class="mono">BindTask()</span>；本轮读取结束后只要缓存非空也会触发。默认 1，可用 <span class="mono">BATCH_BIND_NUM</span> 调大 <span class="loc">cache.go:454-461,874,1379-1403</span></div>
+        </div>
+        <div class="flow-arrow line"></div>
+        <div class="kcard">
+          <span class="kcard-title">BindTask()</span><span class="kcard-anno">cache.go : 1455-1475，新 goroutine 执行</span>
+          <div class="note"><span class="mono">executePreBinds</span>（PreBind 钩子）→ <span class="mono">sc.Binder.Bind(kubeClient, tasks)</span>，这里调用 K8s API 完成 Pod Binding；该 goroutine 独立于本轮 action 循环执行</div>
+        </div>
+        <div class="flow-arrow line"></div>
+        <div class="kcard-row" style="gap:14px">
+          <div class="kcard" style="flex:1; border-color:#2E7D32">
+            <span class="kcard-title" style="color:#2E7D32">成功</span>
+            <div class="note">Recorder 发 <span class="mono">Scheduled</span> 事件 <span class="loc">cache.go:999</span></div>
+          </div>
+          <div class="kcard" style="flex:1; border-color:var(--red)">
+            <span class="kcard-title" style="color:var(--red)">失败</span>
+            <div class="note"><span class="mono">taskUnschedulable</span> + <span class="mono">PreBindRollBack</span> + <span class="mono">resyncTask</span>，由错误队列同步缓存后再参与调度 <span class="loc">cache.go:1000-1014,1204-1285</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="big-arrow"></div>
+
+      <!-- 6 CloseSession -->
+      <div class="sec" style="background: var(--stage-close-bg)">
+        <div class="sec-head">
+          <div class="sec-num" style="background:var(--stage-close)">6</div>
+          <div class="sec-title" style="color:var(--stage-close)">CloseSession：收尾</div>
+          <div class="sec-note">framework.go : 62-71 · session.go : 558-578</div>
+        </div>
+        <div class="kcard">
+          <span class="kcard-title">逐插件 OnSessionClose</span>
+          <div class="note">遍历的是 <span class="mono">ssn.plugins</span> map，所以关闭顺序不保证等于 <span class="mono">OnSessionOpen</span> 顺序 <span class="loc">framework.go:63-68</span></div>
+        </div>
+        <div class="flow-arrow line"></div>
+        <div class="kcard">
+          <span class="kcard-title">JobUpdater.UpdateAll</span><span class="kcard-anno">job_updater.go : 63-65</span>
+          <div class="note">16 个 worker 并行把每个 Job 的 PodGroup status / condition 写回 API Server</div>
+        </div>
+        <div class="flow-arrow line"></div>
+        <div class="kcard" id="loop-source">
+          <span class="kcard-title">updateQueueStatus → cache.OnSessionClose()</span>
+          <div class="note">清空 ssn 引用，关闭本轮会话</div>
+        </div>
+      </div>
+
+      <div class="done-badge"><span>本轮调度结束</span></div>
+
+      <div class="card-foot">基于 <span class="mono">volcano.sh/volcano</span> <span class="mono">master@8e7c43a9f</span>（2026-06-16）源码核对<br>默认动作链 enqueue → allocate → backfill；preempt / reclaim / gangpreempt / gangreclaim / shuffle 已注册但默认未启用，本卡未展开</div>
+
+      <div id="path-layer"></div>
+    </div>
+  </div>
+
+  <!-- ===================== 右：发布内容 ===================== -->
+  <div class="right">
+    <div class="panel">
+      <h3>下载卡片 PNG（无损）
+        <span class="dl-row" style="margin-left:auto">
+          <select id="dl-scale">
+            <option value="2">2× 高清</option>
+            <option value="3" selected>3× 超清</option>
+            <option value="4">4× 打印级</option>
+          </select>
+          <button class="dl-btn" onclick="downloadPNG()">下载 PNG</button>
+        </span>
+      </h3>
+      <div style="font-size:12px;color:var(--gray)">导出为无损 PNG；首次使用需联网加载 html2canvas。</div>
+    </div>
+
+    <div class="panel">
+      <h3>标题</h3>
+      <div class="title-item">
+        <span class="ti-tag main">主</span>
+        <div class="ti-text" id="title-main">Volcano 一轮调度：从 OpenSession 到 Pod Binding</div>
+        <button class="copy-btn" onclick="copyText('title-main')">复制</button>
+      </div>
+      <div class="title-item">
+        <span class="ti-tag">备选</span>
+        <div class="ti-text" id="title-alt1">源码看 Volcano 调度器：一次 runOnce 的执行顺序</div>
+        <button class="copy-btn" onclick="copyText('title-alt1')">复制</button>
+      </div>
+      <div class="title-item">
+        <span class="ti-tag">备选</span>
+        <div class="ti-text" id="title-alt2">Volcano 默认调度周期：enqueue、allocate、backfill</div>
+        <button class="copy-btn" onclick="copyText('title-alt2')">复制</button>
+      </div>
+    </div>
+
+    <div class="panel grow">
+      <h3>正文（纯文本，可直接粘贴公众号）<button class="copy-btn" onclick="copyText('pub-body')">复制</button></h3>
+      <div id="pub-body">Volcano 调度器的一轮调度，由 runOnce 创建 Session，在快照对象上执行 action 列表，再把可绑定任务交给异步绑定队列。
+
+一、入口只负责注册
+
+入口在 cmd/scheduler/main.go。两行空导入触发 pkg/scheduler/actions 和 pkg/scheduler/plugins 的 init，完成 action 与 plugin builder 注册。
+
+注意，注册不等于执行。actions/factory.go 注册了 reclaim、allocate、backfill、preempt、gangpreempt、gangreclaim、enqueue、shuffle，但默认配置只启用 enqueue、allocate、backfill。
+
+二、默认执行顺序由配置决定
+
+DefaultSchedulerConf 在 pkg/scheduler/util.go。默认 action 链是 enqueue、allocate、backfill。
+
+默认插件分两层。第一层是 priority、gang、conformance。第二层是 overcommit、drf、predicates、proportion、nodeorder。
+
+这些插件在 OpenSession 时把函数注册进 Session。enqueue 主要用 QueueOrderFn、JobOrderFn、JobEnqueueable、JobEnqueued；allocate 和 backfill 主要用 JobValid、JobReady、Allocatable、PrePredicateFn、PredicateFn、NodeOrderFn。扩展点按 Tier 和声明顺序遍历，未注册对应函数的插件会被跳过。
+
+三、每轮从 OpenSession 开始
+
+调度周期默认是 1 秒，由 wait.Until(pc.runOnce, schedulePeriod, stopCh) 驱动。它不是墙钟意义上的整秒触发，而是 runOnce 返回后按 period 再等下一轮。
+
+每轮 runOnce 会调用 OpenSession。OpenSession 先从 cache 做 Snapshot。Nodes、Queues、Jobs 在 Snapshot 中走 Clone；HyperNodes、分层集合与真实节点集合由 HyperNodesInfo 返回深拷贝。调度过程使用这一份对象，不直接使用 informer 后续写入的对象。
+
+随后它按 Tier 顺序、Tier 内声明顺序执行 OnSessionOpen，完成插件函数注册。
+
+四、enqueue 负责队列准入
+
+enqueue 遍历 ssn.Jobs，把 Pending Job 按 Queue 分组。Queue 用 QueueOrderFn 排序，Job 用 JobOrderFn 排序。
+
+当 PodGroup.Spec.MinResources 为空，或 ssn.JobEnqueueable(job) 通过时，enqueue 调用 ssn.JobEnqueued(job)，并把 PodGroup.Status.Phase 设置为 Inqueue。
+
+五、allocate 是主要分配动作
+
+allocate 负责给普通资源请求任务选择节点。默认配置包含 enqueue 时，仍是 Pending 的 Job 会被 allocate 跳过。
+
+allocate 会按 QueueOrderFn、JobOrderFn、TaskOrderFn 组织优先队列，并在队列和作业之间循环推进。对单个任务，它先做 Allocatable，再做 PrePredicateFn 和 PredicateNodes。
+
+BestEffort task 会在 allocate 中被跳过，后面交给 backfill 处理。
+
+节点筛选后进入评分。Volcano 会先看当前空闲资源，soft sharding 下再考虑其他 shard；空闲资源不够时，才看 FutureIdle，也就是 Idle 加 Releasing 再减 Pipelined。
+
+如果选中节点的 Idle 够用，任务进入 Allocate。如果只有 FutureIdle 够用，任务进入 Pipeline，表示本轮只记录对未来释放资源的预分配。
+
+六、backfill 处理 BestEffort 任务
+
+backfill 只处理 task.BestEffort 为 true 的任务。这个标记在 cache 构造 TaskInfo 时由 InitResreq.IsEmpty 设置。
+
+backfill 会先跳过仍是 Pending 的 Job，然后在其余 Job 中挑 Pending 和 Pipelined 的 BestEffort task。Pipelined task 会先 UnPipeline，再进入 backfill 的待处理队列。
+
+随后 backfill 执行 PrePredicateFn、PredicateNodes 和评分，然后调用 ssn.Allocate。这个路径不经过 backfill 自己的 Statement.Commit。ssn.Allocate 在 JobReady 后仍然会 dispatch，继续进入 AddBindTask 和异步绑定队列。
+
+七、Pod Binding 是异步旁路
+
+allocate 或 backfill 把可绑定任务写入 BindFlowChannel 后，Pod Binding 由 cache 的后台流程执行。
+
+allocate action 使用 Statement 暂存 Allocate、Pipeline、Evict 等操作。只有 stmt.Commit 走到 Allocate 操作时，才会调用 s.allocate，再进入 cache.AddBindTask。
+
+AddBindTask 会把任务状态更新为 Binding，并写入容量 5000 的 BindFlowChannel。cache.Run 里另有 processBindTask 每 20ms 读取这个 channel。
+
+processBindTask 读到 batchNum 个任务会触发 BindTask。本轮读取结束后，只要本地 bindCache 非空，也会触发一次 BindTask。batchNum 默认是 1，可以通过 BATCH_BIND_NUM 调大。
+
+BindTask 会新起 goroutine，先执行 PreBind 钩子，再调用 Binder.Bind。这一步通过 Kubernetes API 做 Pod Binding。成功后发 Scheduled 事件。失败后会标记 SchedulerError，执行 PreBindRollBack，并把任务放进 errTasks 等待 resync。
+
+八、CloseSession 收尾
+
+runOnce 最后 defer CloseSession。CloseSession 会先调用插件的 OnSessionClose，但这里遍历的是 ssn.plugins map，所以关闭顺序不保证等于打开顺序。
+
+随后 JobUpdater 用 16 个 worker 并行更新 PodGroup 状态，updateQueueStatus 写回 Queue allocated，最后 cache.OnSessionClose 结束本轮会话。
+
+下一轮 wait.Until 再次触发 runOnce，一切重新从新的 Snapshot 开始。</div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 1800);
+}
+function copyText(id) {
+  navigator.clipboard.writeText(document.getElementById(id).innerText)
+    .then(() => toast('已复制'))
+    .catch(() => toast('复制失败，请手动选择'));
+}
+function downloadPNG() {
+  const scale = parseInt(document.getElementById('dl-scale').value, 10);
+  const card = document.getElementById('card');
+  toast('正在渲染 ' + scale + '× PNG…');
+  html2canvas(card, { scale, backgroundColor: '#FFFFFF', useCORS: true, logging: false })
+    .then(canvas => canvas.toBlob(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = (document.title || 'memory-card') + '@' + scale + 'x.png';
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast('已下载');
+    }, 'image/png'))
+    .catch(() => toast('渲染失败：请检查网络（html2canvas 未加载）'));
+}
+
+function layoutPaths() {
+  const card = document.getElementById('card');
+  const src = document.getElementById('loop-source');
+  const tgt = document.getElementById('loop-target');
+  const layer = document.getElementById('path-layer');
+  if (!card || !src || !tgt || !layer) return;
+
+  const cardRect = card.getBoundingClientRect();
+  const srcRect = src.getBoundingClientRect();
+  const tgtRect = tgt.getBoundingClientRect();
+  const tgtHead = tgt.querySelector('.sec-head');
+  const tgtHeadRect = tgtHead ? tgtHead.getBoundingClientRect() : tgtRect;
+
+  const lineX = cardRect.width - 20;
+  const srcY = srcRect.top - cardRect.top + srcRect.height / 2;
+  // Align to the section's title row, not the outer box's rounded corner,
+  // otherwise the line lands inside the border-radius curve and looks disconnected.
+  const tgtY = tgtHeadRect.top - cardRect.top + tgtHeadRect.height / 2;
+  const srcRightX = Math.min(srcRect.right - cardRect.left, lineX - 12);
+  const tgtRightX = tgtRect.right - cardRect.left - 2;
+  const midY = (tgtY + srcY) / 2;
+  const labelHeight = 156;
+  const labelTop = Math.max(tgtY + 14, Math.min(srcY - labelHeight - 8, midY - labelHeight / 2));
+  const labelLeft = Math.max(8, Math.min(lineX - 38, cardRect.width - 38));
+
+  layer.innerHTML =
+    '<svg width="' + cardRect.width + '" height="' + cardRect.height + '" viewBox="0 0 ' + cardRect.width + ' ' + cardRect.height + '" aria-hidden="true">' +
+      '<defs><marker id="returnArrowHead" viewBox="0 0 10 10" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L10,5 L0,10 Z" fill="var(--red)"/></marker></defs>' +
+      '<path d="M' + srcRightX + ' ' + srcY + ' H' + lineX + '" fill="none" stroke="var(--red)" stroke-width="2"/>' +
+      '<path d="M' + lineX + ' ' + srcY + ' V' + tgtY + '" fill="none" stroke="var(--red)" stroke-width="2" stroke-dasharray="5 5"/>' +
+      '<path d="M' + lineX + ' ' + tgtY + ' H' + tgtRightX + '" fill="none" stroke="var(--red)" stroke-width="2" marker-end="url(#returnArrowHead)"/>' +
+    '</svg>' +
+    '<div class="return-label vert" style="top:' + labelTop + 'px; left:' + labelLeft + 'px;">1 秒后 wait.Until 重入</div>';
+}
+window.addEventListener('load', layoutPaths);
+window.addEventListener('resize', layoutPaths);
+</script>
+</body>
+</html>
